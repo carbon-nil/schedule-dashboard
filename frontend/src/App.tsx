@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api, ApiError, type Block, type Day, type Task } from "./api";
 import { BlockPanel } from "./BlockPanel";
 import { CalendarSettings } from "./CalendarSettings";
+import { WindowSettings } from "./WindowSettings";
 import { draftFor, emptyDraft, type Draft } from "./draft";
 import { addDays, minutesBetween, toJstInput, todayJst } from "./time";
 import { Timeline } from "./Timeline";
@@ -214,6 +215,7 @@ const Dashboard = () => {
                             onDelete={remove}
                             onComplete={complete}
                         />
+                        <WindowSettings />
                         <CalendarSettings />
                     </div>
                 </div>

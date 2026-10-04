@@ -23,6 +23,15 @@ export const toUtcIso = (value: string): string => {
 
 export const formatJstTime = (iso: string): string => toJstInput(iso).slice(11, 16);
 
+/** 分数を "HH:mm" にする (活動可能時間の表示用)。 */
+export const minutesToHm = (minutes: number): string =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+export const hmToMinutes = (hm: string): number => {
+    const [h, m] = hm.split(":").map(Number);
+    return h * 60 + m;
+};
+
 export const minutesBetween = (startIso: string, endIso: string): number =>
     Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000);
 

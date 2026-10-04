@@ -43,9 +43,17 @@ export interface CalendarEntry {
     primary: boolean;
 }
 
+/** weekday は月曜=0、日曜=6。分は日本時間の 0 時からの分数。 */
+export interface WeeklyWindow {
+    weekday: number;
+    startMinute: number;
+    endMinute: number;
+}
+
 export interface Settings {
     settingsVersion: number;
     selectedCalendarIds: string[];
+    weeklyWindows: WeeklyWindow[];
 }
 
 export class ApiError extends Error {
