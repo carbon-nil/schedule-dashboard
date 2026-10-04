@@ -4,6 +4,7 @@ import { api, ApiError, type Block, type Day, type Task } from "./api";
 import { BlockPanel } from "./BlockPanel";
 import { CalendarSettings } from "./CalendarSettings";
 import { FreeTime } from "./FreeTime";
+import { SharePanel } from "./SharePanel";
 import { WindowSettings } from "./WindowSettings";
 import { draftFor, emptyDraft, type Draft } from "./draft";
 import { addDays, minutesBetween, toJstInput, todayJst } from "./time";
@@ -217,6 +218,7 @@ const Dashboard = () => {
                             onComplete={complete}
                         />
                         <FreeTime day={day.data} />
+                        <SharePanel />
                         <WindowSettings />
                         <CalendarSettings />
                     </div>

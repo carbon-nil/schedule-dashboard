@@ -23,6 +23,12 @@ export const toUtcIso = (value: string): string => {
 
 export const formatJstTime = (iso: string): string => toJstInput(iso).slice(11, 16);
 
+/** "MM/DD HH:mm" (日本時間)。 */
+export const formatJst = (iso: string): string => {
+    const s = toJstInput(iso);
+    return `${s.slice(5, 7)}/${s.slice(8, 10)} ${s.slice(11, 16)}`;
+};
+
 /** 分数を "HH:mm" にする (活動可能時間の表示用)。 */
 export const minutesToHm = (minutes: number): string =>
     `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;

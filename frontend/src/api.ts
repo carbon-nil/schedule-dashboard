@@ -63,6 +63,26 @@ export interface Settings {
     weeklyWindows: WeeklyWindow[];
 }
 
+export interface Share {
+    id: string;
+    rangeStart: string;
+    rangeEnd: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    minFreeMinutes: number;
+    createdAt: string;
+    version: number;
+}
+
+export interface PublicAvailability {
+    timezone: string;
+    computedAt: string;
+    externalFetchedAt: string;
+    rangeStart: string;
+    rangeEnd: string;
+    freeIntervals: Interval[];
+}
+
 export class ApiError extends Error {
     constructor(
         readonly status: number,
