@@ -7,6 +7,7 @@ import "@fullcalendar/react/skeleton.css";
 import "@fullcalendar/react/themes/classic/theme.css";
 import "@fullcalendar/react/themes/classic/palette.css";
 import { type Day } from "./api";
+import { blockLabel } from "./draft";
 import { toUtcIso } from "./time";
 
 interface Props {
@@ -30,7 +31,7 @@ export const Timeline = ({ day, onSelectRange, onSelectBlock, onMoveBlock }: Pro
         })),
         ...day.blocks.map(b => ({
             id: b.id,
-            title: b.title,
+            title: blockLabel(b, day.tasks),
             start: b.startAt,
             end: b.endAt,
             editable: true,
