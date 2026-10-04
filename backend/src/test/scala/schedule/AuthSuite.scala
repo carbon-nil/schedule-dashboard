@@ -19,7 +19,8 @@ object AuthSuite:
         googleClientId = "client",
         googleClientSecret = "secret",
         ownerGoogleSub = "owner",
-        tokenEncryptionKey = new Array[Byte](32)
+        tokenEncryptionKey = new Array[Byte](32),
+        todoistApiToken = None
     )
 
 class AuthSuite extends munit.CatsEffectSuite:

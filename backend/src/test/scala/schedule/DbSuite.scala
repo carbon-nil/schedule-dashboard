@@ -18,7 +18,7 @@ class DbSuite extends munit.CatsEffectSuite:
             mode <- sql"PRAGMA journal_mode".query[String].unique.transact(xa)
             settings <- sql"SELECT count(*) FROM app_settings".query[Int].unique.transact(xa)
         yield
-            assertEquals(version, 2)
+            assertEquals(version, 3)
             assertEquals(fk, 1)
             assertEquals(mode, "wal")
             assertEquals(settings, 1)
@@ -30,4 +30,22 @@ class DbSuite extends munit.CatsEffectSuite:
             _ <- Db.migrate(xa)
             r <- sql"INSERT INTO weekly_windows VALUES ('w', 0, 600, 600)".update.run.transact(xa).attempt
         yield assert(r.isLeft)
+    }
+
+    test("Block はタイトルとタスク参照のどちらか一方だけ持てる") {
+        for
+            xa <- freshDb
+            _ <- Db.migrate(xa)
+            both <-
+                sql"INSERT INTO blocks (id, title, todoist_task_id, start_at, end_at) VALUES ('b', 't', 'x', 1, 2)".update.run
+                    .transact(xa)
+                    .attempt
+            neither <- sql"INSERT INTO blocks (id, start_at, end_at) VALUES ('n', 1, 2)".update.run.transact(xa).attempt
+            one <- sql"INSERT INTO blocks (id, todoist_task_id, start_at, end_at) VALUES ('o', 'x', 1, 2)".update.run
+                .transact(xa)
+                .attempt
+        yield
+            assert(both.isLeft)
+            assert(neither.isLeft)
+            assert(one.isRight)
     }
