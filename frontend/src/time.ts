@@ -23,6 +23,21 @@ export const toUtcIso = (value: string): string => {
 
 export const formatJstTime = (iso: string): string => toJstInput(iso).slice(11, 16);
 
+/** 日付ごとに区切った区間の終了時刻。翌日 0 時なら "24:00" と出す。 */
+export const formatJstEnd = (iso: string): string => {
+    const t = formatJstTime(iso);
+    return t === "00:00" ? "24:00" : t;
+};
+
+/** 区間を日本時間の日付境界で分ける。日をまたぐ空きを「22:00–02:00」のように 1 日へ押し込まない。 */
+export const splitByJstDay = (i: { start: string; end: string }): { day: string; start: string; end: string }[] => {
+    const day = toJstInput(i.start).slice(0, 10);
+    const nextMidnight = toUtcIso(`${addDays(day, 1)}T00:00`);
+    return new Date(nextMidnight) < new Date(i.end)
+        ? [{ day, start: i.start, end: nextMidnight }, ...splitByJstDay({ start: nextMidnight, end: i.end })]
+        : [{ day, start: i.start, end: i.end }];
+};
+
 /** "MM/DD HH:mm" (日本時間)。 */
 export const formatJst = (iso: string): string => {
     const s = toJstInput(iso);

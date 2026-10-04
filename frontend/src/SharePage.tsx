@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Interval, type PublicAvailability } from "./api";
-import { formatJst, formatJstTime, toJstInput } from "./time";
+import { formatJst, formatJstEnd, formatJstTime, splitByJstDay } from "./time";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -24,10 +24,9 @@ const Availability = ({ token }: { token: string }) => {
         queryFn: () => api<PublicAvailability>("GET", `/api/public/availability/${token}`),
         refetchInterval: 60_000,
     });
-    const byDay = (q.data?.freeIntervals ?? []).reduce<Record<string, Interval[]>>((acc, i) => {
-        const day = toJstInput(i.start).slice(0, 10);
-        return { ...acc, [day]: [...(acc[day] ?? []), i] };
-    }, {});
+    const byDay = (q.data?.freeIntervals ?? [])
+        .flatMap(splitByJstDay)
+        .reduce<Record<string, Interval[]>>((acc, p) => ({ ...acc, [p.day]: [...(acc[p.day] ?? []), p] }), {});
 
     return (
         <main className="mx-auto max-w-xl p-4">
@@ -47,7 +46,7 @@ const Availability = ({ token }: { token: string }) => {
                             <ul>
                                 {intervals.map(i => (
                                     <li key={i.start}>
-                                        {formatJstTime(i.start)}–{formatJstTime(i.end)}
+                                        {formatJstTime(i.start)}–{formatJstEnd(i.end)}
                                     </li>
                                 ))}
                             </ul>
