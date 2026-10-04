@@ -257,6 +257,24 @@ class ApiSuite extends munit.CatsEffectSuite:
             )
     }
 
+    test("カレンダーを 1 つも選んでいないと空きは出さず、プレビューは 503") {
+        for
+            (app, _) <- setup()
+            _ <- send(
+                app,
+                Method.PUT,
+                uri"/api/settings",
+                j(
+                    """{"expectedVersion":1,"selectedCalendarIds":[],"weeklyWindows":[{"weekday":0,"startMinute":540,"endMinute":1080}]}"""
+                )
+            )
+            (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
+            (preview, _) <- send(app, Method.POST, uri"/api/shares/preview", shareInput("p"))
+        yield
+            assertEquals(day.toOption.get.hcursor.downField("freeIntervals").focus.map(_.isNull), Some(true))
+            assertEquals(preview, Status.ServiceUnavailable)
+    }
+
     private def shareInput(id: String) =
         j(
             s"""{"requestId":"$id","rangeStart":"2026-10-12T00:00:00Z","rangeEnd":"2026-10-12T12:00:00Z","minFreeMinutes":60}"""

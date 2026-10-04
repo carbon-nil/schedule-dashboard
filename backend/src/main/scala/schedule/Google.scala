@@ -72,9 +72,8 @@ final class Google(
         val key = (calendarIds.sorted, range)
         IO.realTime.map(_.toMillis).flatMap { now =>
             busyCache.get.map(_.get(key).filter(_._1 > now - 60000)).flatMap {
-                case Some(hit)                   => IO.pure(Right(hit))
-                case None if calendarIds.isEmpty => IO.pure(Right((now, Nil)))
-                case None                        =>
+                case Some(hit) => IO.pure(Right(hit))
+                case None      =>
                     val body = Json.obj(
                         "timeMin" -> Json.fromString(Instant.ofEpochMilli(range.start).toString),
                         "timeMax" -> Json.fromString(Instant.ofEpochMilli(range.end).toString),

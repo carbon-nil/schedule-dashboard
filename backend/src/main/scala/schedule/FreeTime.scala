@@ -15,7 +15,10 @@ final class FreeTime(xa: Transactor[IO], google: Google):
                 .to[List]
                 .transact(xa)
             blocks <- Blocks.inRange(range).transact(xa)
-            busy <- google.freeBusy(ids, range)
+            // 予定を取り込むまで空き時間を出さない (設計書 4.2)。カレンダー未選択で「全部空き」にしない
+            busy <-
+                if ids.isEmpty then IO.pure(Left(GoogleError.Failed("表示するカレンダーを選ぶと空き時間を計算します")))
+                else google.freeBusy(ids, range)
         yield busy.map { (fetchedAt, googleBusy) =>
             val all = googleBusy ++ blocks.map(b => Interval(b.start, b.end))
             FreeTime.Result(Availability.free(windows, all, range).toList, fetchedAt)
