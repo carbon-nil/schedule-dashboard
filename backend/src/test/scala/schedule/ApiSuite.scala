@@ -28,7 +28,7 @@ class ApiSuite extends munit.CatsEffectSuite:
             _ <- Db.migrate(xa)
             cache <- Ref.of[IO, Option[(String, Long)]](Some(("at", Long.MaxValue)))
             busyCache <- Ref.of[IO, Map[(List[String], Interval), (Long, List[Interval])]](Map.empty)
-            limits <- Ref.of[IO, Map[String, (Long, Int)]](Map.empty)
+            limits <- Ref.of[IO, (Long, Map[String, Int])]((0L, Map.empty))
             closed <- Ref.of[IO, List[String]](Nil)
             client = Client.fromHttpApp[IO](HttpApp[IO] { req =>
                 val path = req.uri.path.renderString
@@ -59,7 +59,7 @@ class ApiSuite extends munit.CatsEffectSuite:
             // 月曜 9:00〜18:00
             _ <- sql"INSERT INTO weekly_windows VALUES ('w', 0, 540, 1080)".update.run.transact(xa)
             api = Api(xa, google, todoist, FreeTime(xa, google), AuthSuite.cfg, RateLimit(limits))
-        yield ((api.publicRoutes <+> api.routes).orNotFound, closed)
+        yield ((api.publicRoutes <+> api.routes).orNotFound, closed, limits)
 
     private def send(app: HttpApp[IO], method: Method, uri: Uri, body: Json = Json.Null) =
         app.run(Request[IO](method, uri).withEntity(body)).flatMap(res => res.as[Json].attempt.map(res.status -> _))
@@ -69,7 +69,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("Block を作り、同じ requestId は 409、終了が開始以前なら 422") {
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             (created, body) <- send(app, Method.POST, uri"/api/blocks", newBlock)
             (dup, _) <- send(app, Method.POST, uri"/api/blocks", newBlock)
             (bad, _) <- send(
@@ -88,7 +88,7 @@ class ApiSuite extends munit.CatsEffectSuite:
     test("古い version での移動・削除は 409。正しい version なら移動でき、削除で一覧から消える (A04)") {
         val moved = j("""{"startAt":"2026-10-05T07:00:00Z","endAt":"2026-10-05T08:00:00Z","expectedVersion":1}""")
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             _ <- send(app, Method.POST, uri"/api/blocks", newBlock)
             (ok, body) <- send(app, Method.PATCH, uri"/api/blocks/b1", moved)
             (stale, _) <- send(app, Method.PATCH, uri"/api/blocks/b1", moved)
@@ -106,7 +106,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("1 日分の予定と Block を返す") {
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             _ <- send(app, Method.POST, uri"/api/blocks", newBlock)
             (status, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
             c = day.toOption.get.hcursor
@@ -119,7 +119,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("Google と Todoist が取得できなくても Block は返し、失敗を errors に載せる (A14)") {
         for
-            (app, _) <- setup(failing = true)
+            (app, _, _) <- setup(failing = true)
             _ <- send(app, Method.POST, uri"/api/blocks", newBlock)
             (status, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
             c = day.toOption.get.hcursor
@@ -135,7 +135,7 @@ class ApiSuite extends munit.CatsEffectSuite:
         def task(id: String, h: Int) =
             j(s"""{"requestId":"$id","todoistTaskId":"t1","startAt":"2026-10-05T0${h}:00:00Z","endAt":"2026-10-05T0${h}:30:00Z"}""")
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             (a, body) <- send(app, Method.POST, uri"/api/blocks", task("k1", 1))
             (b, _) <- send(app, Method.POST, uri"/api/blocks", task("k2", 2))
             (both, _) <- send(
@@ -166,7 +166,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("完了は単件取得のあと close を呼ぶ。繰り返しは 422 で close しない (A26)。完了・削除済みは 404") {
         for
-            (app, closed) <- setup()
+            (app, closed, _) <- setup()
             (ok, body) <- send(app, Method.POST, uri"/api/tasks/t1/complete")
             (recurring, _) <- send(app, Method.POST, uri"/api/tasks/t2/complete")
             (gone, _) <- send(app, Method.POST, uri"/api/tasks/t9/complete")
@@ -181,7 +181,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("設定は expectedVersion が古ければ 409") {
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             (ok, body) <- send(
                 app,
                 Method.PUT,
@@ -225,7 +225,7 @@ class ApiSuite extends munit.CatsEffectSuite:
         val block =
             j("""{"requestId":"b","title":"作業","startAt":"2026-10-05T05:00:00Z","endAt":"2026-10-05T06:30:00Z"}""")
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             _ <- send(app, Method.POST, uri"/api/blocks", block)
             (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
             free = day.toOption.get.hcursor.downField("freeIntervals").as[List[Map[String, String]]].toOption.get
@@ -241,7 +241,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("A13: freeBusy が取れないと本人画面の空きは null、共有プレビューと公開は 503。公開側は理由を出さない") {
         for
-            (app, _) <- setup(failing = true)
+            (app, _, _) <- setup(failing = true)
             (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
             (preview, _) <- send(app, Method.POST, uri"/api/shares/preview", shareInput("p"))
             (_, created) <- send(app, Method.POST, uri"/api/shares", shareInput("s"))
@@ -259,7 +259,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("カレンダーを 1 つも選んでいないと空きは出さず、プレビューは 503") {
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             _ <- send(
                 app,
                 Method.PUT,
@@ -282,7 +282,7 @@ class ApiSuite extends munit.CatsEffectSuite:
 
     test("共有: 作成応答だけが URL を返し、公開 API は日時だけを返す (A09)。失効後は 404 (A12)") {
         for
-            (app, _) <- setup()
+            (app, _, _) <- setup()
             (created, body) <- send(app, Method.POST, uri"/api/shares", shareInput("s1"))
             (dup, _) <- send(app, Method.POST, uri"/api/shares", shareInput("s1"))
             url = body.toOption.flatMap(_.hcursor.get[String]("url").toOption).get
@@ -294,6 +294,10 @@ class ApiSuite extends munit.CatsEffectSuite:
                 Uri.unsafeFromString(s"/api/public/availability/$token?rangeEnd=2026-12-01T00:00:00Z")
             )
             keys = dto.toOption.flatMap(_.asObject).map(_.keys.toSet)
+            // リンクごとの上限は 30 回/分。1 回目は上の pub
+            repeated <- (1 to 30).toList.traverse(_ =>
+                send(app, Method.GET, Uri.unsafeFromString(s"/api/public/availability/$token")).map(_._1)
+            )
             (revoked, _) <- send(app, Method.POST, uri"/api/shares/s1/revoke", j("""{"expectedVersion":1}"""))
             (gone, _) <- send(app, Method.GET, Uri.unsafeFromString(s"/api/public/availability/$token"))
             (unknown, _) <- send(app, Method.GET, uri"/api/public/availability/nope")
@@ -315,14 +319,16 @@ class ApiSuite extends munit.CatsEffectSuite:
                     .map(_.map(_("start"))),
                 Some(List("2026-10-12T00:00:00Z", "2026-10-12T03:00:00Z"))
             )
+            assertEquals(repeated.take(29).toSet, Set(Status.Ok))
+            assertEquals(repeated.last, Status.TooManyRequests)
             assertEquals(revoked, Status.Ok)
             assertEquals(gone, Status.NotFound)
             assertEquals(unknown, Status.NotFound)
     }
 
-    test("共有: 31 日超、期限が期間の後、過去の期間は 422。公開 API はリンクごとに 1 分 30 回まで") {
+    test("共有: 31 日超、期限が期間の後、過去の期間は 422。不明なトークンは IP の上限 60 回/分だけで数え、トークンごとの状態を作らない") {
         for
-            (app, _) <- setup()
+            (app, _, limits) <- setup()
             (long, _) <- send(
                 app,
                 Method.POST,
@@ -343,11 +349,16 @@ class ApiSuite extends munit.CatsEffectSuite:
                 uri"/api/shares",
                 j("""{"requestId":"y","rangeStart":"2020-01-01T00:00:00Z","rangeEnd":"2020-01-02T00:00:00Z"}""")
             )
-            statuses <- (1 to 31).toList.traverse(_ => send(app, Method.GET, uri"/api/public/availability/t").map(_._1))
+            statuses <- (1 to 61).toList.traverse(i =>
+                send(app, Method.GET, Uri.unsafeFromString(s"/api/public/availability/t$i")).map(_._1)
+            )
+            keys <- limits.get.map(_._2.keySet)
         yield
             assertEquals(long, Status.UnprocessableContent)
             assertEquals(late, Status.UnprocessableContent)
             assertEquals(past, Status.UnprocessableContent)
-            assertEquals(statuses.take(30).toSet, Set(Status.NotFound))
+            assertEquals(statuses.take(60).toSet, Set(Status.NotFound))
             assertEquals(statuses.last, Status.TooManyRequests)
+            assertEquals(keys.filter(_.startsWith("share:")), Set.empty[String])
+            assertEquals(keys.count(_.startsWith("ip:")), 1)
     }

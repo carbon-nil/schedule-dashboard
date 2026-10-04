@@ -27,8 +27,8 @@ object Main extends IOApp.Simple:
                 google = Google(cfg, client, auth.refreshToken, tokenCache, busyCache)
                 health = HttpRoutes.of[IO] { case GET -> Root / "api" / "health" => Ok("ok") }
                 todoist = Todoist(cfg.todoistApiToken, client)
-                limits <- Ref.of[IO, Map[String, (Long, Int)]](Map.empty)
-                api = Api(xa, google, todoist, FreeTime(xa, google), cfg, RateLimit(limits))
+                limiter <- RateLimit.empty
+                api = Api(xa, google, todoist, FreeTime(xa, google), cfg, limiter)
                 routes = health <+> auth.routes <+> api.publicRoutes <+> auth.protect(api.routes) <+>
                     cfg.staticDir.fold(HttpRoutes.empty[IO])(spa)
                 _ <- EmberServerBuilder

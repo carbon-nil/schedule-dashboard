@@ -150,25 +150,32 @@ final class Api(
     /** 認証なしの公開 API (設計書 10 章)。受け取るのはトークンだけで、期間やカレンダーは指定できない (A23)。 */
     val publicRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
         case req @ GET -> Root / "api" / "public" / "availability" / token =>
+            // 接続元は Cloudflare Tunnel 経由なら CF-Connecting-IP (Cloudflare が上書きする)。X-Forwarded-For は
+            // 閲覧者が自由に書けるので使わない。直接つないだときは remoteAddr
             val ip = req.headers
-                .get(ci"X-Forwarded-For")
-                .map(_.head.value.takeWhile(_ != ',').trim)
+                .get(ci"CF-Connecting-IP")
+                .map(_.head.value.trim)
                 .orElse(req.remoteAddr.map(_.toString))
                 .getOrElse("-")
-            (limiter.allow(s"ip:$ip", 60), limiter.allow(s"token:${Crypto.sha256(token)}", 30)).tupled
+            // IP の上限を先に見て、超えていればここで終える。リンクごとの回数は有効な共有にだけ割り当てる
+            limiter
+                .allow(s"ip:$ip", 60)
                 .flatMap {
-                    case (ipOk, tokenOk) if !ipOk || !tokenOk =>
-                        ApiError(Status.TooManyRequests, "RATE_LIMITED", "しばらく待ってから開き直してください")
-                    case _ =>
+                    case false => rateLimited
+                    case true  =>
                         IO.realTime.map(_.toMillis).flatMap { now =>
                             Shares.valid(Crypto.sha256(token), now).transact(xa).flatMap {
                                 // 失効・期限切れ・不明は同じ 404 (A12)
                                 case None    => ApiError(Status.NotFound, "NOT_FOUND", "このリンクは無効です")
                                 case Some(s) =>
-                                    // 公開側には理由 (カレンダー ID など) を出さない (設計書 9 章)
-                                    publicDto(Interval(s.rangeStart, s.rangeEnd), s.minFreeMinutes).flatMap(
-                                        _.fold(_ => publicUnavailable, dto => Ok(dto.asJson))
-                                    )
+                                    limiter.allow(s"share:${s.id}", 30).flatMap {
+                                        case false => rateLimited
+                                        case true  =>
+                                            // 公開側には理由 (カレンダー ID など) を出さない (設計書 9 章)
+                                            publicDto(Interval(s.rangeStart, s.rangeEnd), s.minFreeMinutes).flatMap(
+                                                _.fold(_ => publicUnavailable, dto => Ok(dto.asJson))
+                                            )
+                                    }
                             }
                         }
                 }
@@ -374,6 +381,7 @@ object Api:
     private def googleUnavailable(e: GoogleError) =
         ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", s"現在確認できません: ${e.message}")
     private val publicUnavailable = ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", "現在確認できません")
+    private val rateLimited = ApiError(Status.TooManyRequests, "RATE_LIMITED", "しばらく待ってから開き直してください")
 
     private def respond(created: Status)(c: Change[Block]): IO[Response[IO]] = c match
         case Change.Done(b)  => IO.pure(Response[IO](created).withEntity(BlockDto.from(b).asJson))
