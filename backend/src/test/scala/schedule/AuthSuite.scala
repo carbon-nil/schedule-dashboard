@@ -11,8 +11,8 @@ import org.typelevel.ci.*
 import java.nio.file.Files
 import java.util.Base64
 
-class AuthSuite extends munit.CatsEffectSuite:
-    private val cfg = Config(
+object AuthSuite:
+    val cfg = Config(
         baseUrl = "https://example.test",
         databasePath = "",
         staticDir = None,
@@ -21,6 +21,9 @@ class AuthSuite extends munit.CatsEffectSuite:
         ownerGoogleSub = "owner",
         tokenEncryptionKey = new Array[Byte](32)
     )
+
+class AuthSuite extends munit.CatsEffectSuite:
+    private val cfg = AuthSuite.cfg
 
     private val setup =
         for

@@ -7,6 +7,8 @@ lazy val root = (project in file("."))
         scalafmtConfig := file("../.scalafmt.conf"),
         scalaVersion := "3.3.8",
         scalacOptions ++= Seq("-deprecation", "-feature", "-Wunused:all"),
+        // IO の for 内でタプルを分解するため (withFilter を要求しない irrefutable パターン)
+        Test / scalacOptions += "-source:future",
         libraryDependencies ++= Seq(
             "org.typelevel" %% "cats-effect" % "3.7.1",
             "org.http4s" %% "http4s-ember-server" % http4sVersion,
