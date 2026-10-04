@@ -24,7 +24,8 @@ object Main extends IOApp.Simple:
                 tokenCache <- Ref.of[IO, Option[(String, Long)]](None)
                 google = Google(cfg, client, auth.refreshToken, tokenCache)
                 public = HttpRoutes.of[IO] { case GET -> Root / "api" / "health" => Ok("ok") }
-                api = auth.protect(Api(xa, google).routes)
+                todoist = Todoist(cfg.todoistApiToken, client)
+                api = auth.protect(Api(xa, google, todoist).routes)
                 routes = public <+> auth.routes <+> api <+> cfg.staticDir.fold(HttpRoutes.empty[IO])(spa)
                 _ <- EmberServerBuilder
                     .default[IO]

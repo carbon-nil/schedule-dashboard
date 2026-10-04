@@ -4,7 +4,8 @@ import cats.syntax.all.*
 import doobie.*
 import doobie.implicits.*
 
-final case class Block(id: String, title: String, start: Long, end: Long, version: Int)
+/** title と taskId はどちらか一方だけ持つ (003_block_task.sql の CHECK)。 */
+final case class Block(id: String, title: Option[String], taskId: Option[String], start: Long, end: Long, version: Int)
 
 enum Change[+A]:
     case Done(value: A)
@@ -14,21 +15,30 @@ enum Change[+A]:
 /** Block の CRUD と version の比較 (設計書 5.3、11 章)。 */
 object Blocks:
     def inRange(range: Interval): ConnectionIO[List[Block]] =
-        sql"""SELECT id, title, start_at, end_at, version FROM blocks
+        sql"""SELECT id, title, todoist_task_id, start_at, end_at, version FROM blocks
               WHERE start_at < ${range.end} AND end_at > ${range.start} ORDER BY start_at"""
             .query[Block]
             .to[List]
 
     private def find(id: String): ConnectionIO[Option[Block]] =
-        sql"SELECT id, title, start_at, end_at, version FROM blocks WHERE id = $id".query[Block].option
+        sql"SELECT id, title, todoist_task_id, start_at, end_at, version FROM blocks WHERE id = $id"
+            .query[Block]
+            .option
 
     /** id はクライアントが作った requestId。同じ id が既にあれば作らずに Conflict。 */
-    def create(id: String, title: String, start: Long, end: Long): ConnectionIO[Change[Block]] =
+    def create(
+        id: String,
+        title: Option[String],
+        taskId: Option[String],
+        start: Long,
+        end: Long
+    ): ConnectionIO[Change[Block]] =
         find(id).flatMap {
             case Some(_) => FC.pure(Change.Conflict)
             case None    =>
-                sql"INSERT INTO blocks (id, title, start_at, end_at) VALUES ($id, $title, $start, $end)".update.run
-                    .as(Change.Done(Block(id, title, start, end, 1)))
+                sql"""INSERT INTO blocks (id, title, todoist_task_id, start_at, end_at)
+                      VALUES ($id, $title, $taskId, $start, $end)""".update.run
+                    .as(Change.Done(Block(id, title, taskId, start, end, 1)))
         }
 
     def move(id: String, start: Long, end: Long, expectedVersion: Int): ConnectionIO[Change[Block]] =

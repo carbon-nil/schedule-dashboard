@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, ApiError, type Block, type Day } from "./api";
+import { api, ApiError, type Block, type Day, type Task } from "./api";
 import { BlockPanel } from "./BlockPanel";
 import { CalendarSettings } from "./CalendarSettings";
 import { draftFor, emptyDraft, type Draft } from "./draft";
@@ -67,15 +67,23 @@ const Dashboard = () => {
         }
     };
 
-    const create = (title: string, startAt: string, endAt: string) =>
+    const create = (title: string | null, taskId: string | null, startAt: string, endAt: string) =>
         run(async () => {
             const block = await api<Block>("POST", "/api/blocks", {
                 requestId: crypto.randomUUID(),
                 title,
+                todoistTaskId: taskId,
                 startAt,
                 endAt,
             });
             setDraft(draftFor(block));
+        });
+
+    /** 失敗やタイムアウトでは完了を表示せず、取り直した一覧で状態を確かめる (A27)。 */
+    const complete = (task: Task) =>
+        run(async () => {
+            await api("POST", `/api/tasks/${task.id}/complete`);
+            if (draft.taskId === task.id) setDraft({ ...draft, taskId: null });
         });
 
     const move = (block: Block, startAt: string, endAt: string) =>
@@ -178,8 +186,8 @@ const Dashboard = () => {
                             day={day.data}
                             onSelectRange={(startAt, endAt) => {
                                 setDraft({
+                                    ...draft,
                                     blockId: null,
-                                    title: "",
                                     start: toJstInput(startAt),
                                     minutes: minutesBetween(startAt, endAt),
                                 });
@@ -204,6 +212,7 @@ const Dashboard = () => {
                             onCreate={create}
                             onMove={move}
                             onDelete={remove}
+                            onComplete={complete}
                         />
                         <CalendarSettings />
                     </div>

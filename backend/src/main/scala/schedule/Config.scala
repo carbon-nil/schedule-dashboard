@@ -10,7 +10,8 @@ final case class Config(
     googleClientId: String,
     googleClientSecret: String,
     ownerGoogleSub: String,
-    tokenEncryptionKey: Array[Byte]
+    tokenEncryptionKey: Array[Byte],
+    todoistApiToken: Option[String]
 )
 
 object Config:
@@ -24,5 +25,7 @@ object Config:
             googleClientId = req("GOOGLE_CLIENT_ID"),
             googleClientSecret = req("GOOGLE_CLIENT_SECRET"),
             ownerGoogleSub = req("OWNER_GOOGLE_SUB"),
-            tokenEncryptionKey = Base64.getDecoder.decode(req("TOKEN_ENCRYPTION_KEY"))
+            tokenEncryptionKey = Base64.getDecoder.decode(req("TOKEN_ENCRYPTION_KEY")),
+            // 未設定でも起動する。Todoist なしでも Google と Block は使える (設計書 6.2)
+            todoistApiToken = sys.env.get("TODOIST_API_TOKEN").filter(_.nonEmpty)
         )

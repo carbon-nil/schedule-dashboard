@@ -7,18 +7,31 @@ export interface CalendarEvent {
     allDay: boolean;
 }
 
+/** title と todoistTaskId はどちらか一方だけ入る。 */
 export interface Block {
     id: string;
-    title: string;
+    title: string | null;
+    todoistTaskId: string | null;
     startAt: string;
     endAt: string;
     version: number;
+}
+
+export interface Task {
+    id: string;
+    title: string;
+    projectId: string;
+    estimateMinutes: number | null;
+    deadlineDate: string | null;
+    isRecurring: boolean;
+    url: string;
 }
 
 export interface Day {
     date: string;
     events: CalendarEvent[];
     blocks: Block[];
+    tasks: Task[];
     fetchedAt: string;
     errors: { source: string; target: string; message: string }[];
 }
