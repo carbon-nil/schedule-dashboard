@@ -22,10 +22,11 @@ object Main extends IOApp.Simple:
                 pending <- Ref.of[IO, Map[String, Auth.Pending]](Map.empty)
                 auth = Auth(cfg, xa, client, Crypto.Aead(cfg.tokenEncryptionKey), pending)
                 tokenCache <- Ref.of[IO, Option[(String, Long)]](None)
-                google = Google(cfg, client, auth.refreshToken, tokenCache)
+                busyCache <- Ref.of[IO, Map[(List[String], Interval), (Long, List[Interval])]](Map.empty)
+                google = Google(cfg, client, auth.refreshToken, tokenCache, busyCache)
                 public = HttpRoutes.of[IO] { case GET -> Root / "api" / "health" => Ok("ok") }
                 todoist = Todoist(cfg.todoistApiToken, client)
-                api = auth.protect(Api(xa, google, todoist).routes)
+                api = auth.protect(Api(xa, google, todoist, FreeTime(xa, google)).routes)
                 routes = public <+> auth.routes <+> api <+> cfg.staticDir.fold(HttpRoutes.empty[IO])(spa)
                 _ <- EmberServerBuilder
                     .default[IO]

@@ -15,7 +15,12 @@ import java.util.UUID
 import scala.util.Try
 
 /** 本人用の API (設計書 9 章)。認証は Auth.protect が前段で済ませる。 */
-final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
+final class Api(
+    xa: Transactor[IO],
+    google: Google,
+    todoist: Todoist,
+    freeTime: FreeTime
+):
     import Api.*
 
     val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
@@ -101,20 +106,26 @@ final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
         )
         for
             ids <- sql"SELECT calendar_id FROM selected_calendars".query[String].to[List].transact(xa)
-            // Google と Todoist は並列に取る。タプルの分解は main では使えない (-source:future はテストだけ)
-            both <- (ids.parTraverse(id => google.events(id, range).map(id -> _)), todoist.tasks).parTupled
-            (fetched, tasks) = both
+            // Google、Todoist、空き時間は並列に取る。タプルの分解は main では使えない (-source:future はテストだけ)
+            all <- (
+                ids.parTraverse(id => google.events(id, range).map(id -> _)),
+                todoist.tasks,
+                freeTime.compute(range)
+            ).parTupled
+            (fetched, tasks, free) = all
             blocks <- Blocks.inRange(range).transact(xa)
             now <- IO.realTime
             events = fetched.flatMap(_._2.toOption.toList.flatten)
             errors = fetched.collect { case (id, Left(e)) => ErrorDto("google", id, e.message) } ++
-                tasks.left.toOption.map(e => ErrorDto("todoist", "tasks", e.message))
+                tasks.left.toOption.map(e => ErrorDto("todoist", "tasks", e.message)) ++
+                free.left.toOption.map(e => ErrorDto("google", "freeBusy", e.message))
             res <- Ok(
                 DayDto(
                     date.toString,
                     events.sortBy(_.start).map(EventDto.from),
                     blocks.map(BlockDto.from),
                     tasks.getOrElse(Nil).map(TaskDto.from),
+                    free.toOption.map(_.free.map(IntervalDto.from)),
                     iso(now.toMillis),
                     errors
                 ).asJson
@@ -197,12 +208,16 @@ object Api:
     object TaskDto:
         def from(t: Task): TaskDto =
             TaskDto(t.id, t.title, t.projectId, t.estimateMinutes, t.deadlineDate, t.isRecurring, t.url)
+    final case class IntervalDto(start: String, end: String) derives Encoder.AsObject
+    object IntervalDto:
+        def from(i: Interval): IntervalDto = IntervalDto(iso(i.start), iso(i.end))
     final case class ErrorDto(source: String, target: String, message: String) derives Encoder.AsObject
     final case class DayDto(
         date: String,
         events: List[EventDto],
         blocks: List[BlockDto],
         tasks: List[TaskDto],
+        freeIntervals: Option[List[IntervalDto]],
         fetchedAt: String,
         errors: List[ErrorDto]
     ) derives Encoder.AsObject

@@ -1,9 +1,10 @@
 package schedule
 
 import cats.effect.{IO, Ref}
-import io.circe.Decoder
+import io.circe.{Decoder, Json}
 import org.http4s.*
 import org.http4s.circe.CirceEntityDecoder.*
+import org.http4s.circe.CirceEntityEncoder.*
 import org.http4s.client.Client
 import org.http4s.headers.Authorization
 import org.http4s.implicits.*
@@ -28,7 +29,8 @@ final class Google(
     cfg: Config,
     client: Client[IO],
     refreshToken: IO[Option[String]],
-    cache: Ref[IO, Option[(String, Long)]]
+    cache: Ref[IO, Option[(String, Long)]],
+    busyCache: Ref[IO, Map[(List[String], Interval), (Long, List[Interval])]]
 ):
     import Google.*
 
@@ -63,6 +65,48 @@ final class Google(
             yield CalendarEvent(item.id, calendarId, item.summary.getOrElse("(無題)"), start, end, allDay)
         })
 
+    /** 選択した全カレンダーの busy。1 件でも errors があれば全体を失敗にする (設計書 6.1、A13)。完全成功した結果だけを 60 秒キャッシュする。キーに選択集合を含むので設定変更で自然に外れる
+      * (A08)。戻り値は (取得時刻, busy)。
+      */
+    def freeBusy(calendarIds: List[String], range: Interval): IO[Either[GoogleError, (Long, List[Interval])]] =
+        val key = (calendarIds.sorted, range)
+        IO.realTime.map(_.toMillis).flatMap { now =>
+            busyCache.get.map(_.get(key).filter(_._1 > now - 60000)).flatMap {
+                case Some(hit)                   => IO.pure(Right(hit))
+                case None if calendarIds.isEmpty => IO.pure(Right((now, Nil)))
+                case None                        =>
+                    val body = Json.obj(
+                        "timeMin" -> Json.fromString(Instant.ofEpochMilli(range.start).toString),
+                        "timeMax" -> Json.fromString(Instant.ofEpochMilli(range.end).toString),
+                        "items" -> Json.arr(calendarIds.map(id => Json.obj("id" -> Json.fromString(id)))*)
+                    )
+                    call[FreeBusyResponse](
+                        Method.POST,
+                        uri"https://www.googleapis.com/calendar/v3/freeBusy",
+                        Some(body)
+                    )
+                        .flatMap {
+                            case Left(e)    => IO.pure(Left(e))
+                            case Right(res) =>
+                                val missing = calendarIds.filterNot(res.calendars.contains)
+                                val failed = res.calendars.collect { case (id, c) if c.errors.nonEmpty => id }
+                                if missing.nonEmpty || failed.nonEmpty then
+                                    val ids = (missing ++ failed).mkString(", ")
+                                    IO.pure(Left(GoogleError.Failed(s"カレンダーの busy を取得できません: $ids")))
+                                else
+                                    val busy = res.calendars.values.toList
+                                        .flatMap(_.busy)
+                                        .map(b =>
+                                            Interval(
+                                                OffsetDateTime.parse(b.start).toInstant.toEpochMilli,
+                                                OffsetDateTime.parse(b.end).toInstant.toEpochMilli
+                                            )
+                                        )
+                                    busyCache.update(_ + (key -> (now, busy))).as(Right((now, busy)))
+                        }
+            }
+        }
+
     private def toMillis(t: EventTime, zone: ZoneId): Option[(Long, Boolean)] =
         t.dateTime
             .map(dt => (OffsetDateTime.parse(dt).toInstant.toEpochMilli, false))
@@ -80,16 +124,19 @@ final class Google(
             }
         loop(None, Nil)
 
+    private def get[A: Decoder](uri: Uri): IO[Either[GoogleError, A]] = call(Method.GET, uri, None)
+
     /** 429 と一時的な 5xx は短い待ちのあと 1 回だけ再試行する (設計書 7 章)。 */
-    private def get[A: Decoder](uri: Uri): IO[Either[GoogleError, A]] =
+    private def call[A: Decoder](method: Method, uri: Uri, body: Option[Json]): IO[Either[GoogleError, A]] =
         def attempt(retried: Boolean): IO[Either[GoogleError, A]] =
             accessToken
                 .flatMap {
                     case Left(e)      => IO.pure(Left(e))
                     case Right(token) =>
-                        val req = Request[IO](Method.GET, uri).putHeaders(
+                        val base = Request[IO](method, uri).putHeaders(
                             Authorization(Credentials.Token(AuthScheme.Bearer, token))
                         )
+                        val req = body.fold(base)(base.withEntity(_))
                         client.run(req).use { res =>
                             res.status.code match
                                 case c if c >= 200 && c < 300 => res.as[A].map(Right(_))
@@ -164,6 +211,14 @@ object Google:
         given Decoder[EventsPage] = Decoder.forProduct3("items", "nextPageToken", "timeZone")(
             (i: Option[List[EventItem]], n: Option[String], z: Option[String]) => EventsPage(i.getOrElse(Nil), n, z)
         )
+
+    final case class BusyPeriod(start: String, end: String) derives Decoder
+    final case class FreeBusyCalendar(busy: List[BusyPeriod], errors: List[Json])
+    object FreeBusyCalendar:
+        given Decoder[FreeBusyCalendar] = Decoder.forProduct2("busy", "errors")(
+            (b: Option[List[BusyPeriod]], e: Option[List[Json]]) => FreeBusyCalendar(b.getOrElse(Nil), e.getOrElse(Nil))
+        )
+    final case class FreeBusyResponse(calendars: Map[String, FreeBusyCalendar]) derives Decoder
 
     trait Paged[A]:
         def next(a: A): Option[String]

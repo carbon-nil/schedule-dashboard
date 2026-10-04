@@ -26,10 +26,18 @@ class ApiSuite extends munit.CatsEffectSuite:
             xa <- IO(Files.createTempFile("api", ".db").toString).map(Db.transactor)
             _ <- Db.migrate(xa)
             cache <- Ref.of[IO, Option[(String, Long)]](Some(("at", Long.MaxValue)))
+            busyCache <- Ref.of[IO, Map[(List[String], Interval), (Long, List[Interval])]](Map.empty)
             closed <- Ref.of[IO, List[String]](Nil)
             client = Client.fromHttpApp[IO](HttpApp[IO] { req =>
                 val path = req.uri.path.renderString
                 if failing then ServiceUnavailable()
+                // 10:00〜12:00 JST が busy (設計書 7 章の計算例)。共有テストの日 (10/12) も同じ
+                else if path == "/calendar/v3/freeBusy" then
+                    Ok(
+                        """{"calendars":{"primary":{"busy":[
+                          {"start":"2026-10-05T10:00:00+09:00","end":"2026-10-05T12:00:00+09:00"},
+                          {"start":"2026-10-12T10:00:00+09:00","end":"2026-10-12T12:00:00+09:00"}]}}}"""
+                    )
                 else if path == "/api/v1/tasks" then
                     Ok(s"""{"results":[$todoistTask,$recurringTask],"next_cursor":null}""")
                 else if path == "/api/v1/tasks/t1" then Ok(todoistTask)
@@ -43,12 +51,12 @@ class ApiSuite extends munit.CatsEffectSuite:
                         "start":{"dateTime":"2026-10-05T10:00:00+09:00"},"end":{"dateTime":"2026-10-05T11:00:00+09:00"}}]}"""
                     )
             })
-            google = Google(AuthSuite.cfg, client, IO.pure(Some("rt")), cache)
+            google = Google(AuthSuite.cfg, client, IO.pure(Some("rt")), cache, busyCache)
             todoist = Todoist(Some("token"), client)
             _ <- sql"INSERT INTO selected_calendars VALUES ('primary')".update.run.transact(xa)
             // 月曜 9:00〜18:00
             _ <- sql"INSERT INTO weekly_windows VALUES ('w', 0, 540, 1080)".update.run.transact(xa)
-        yield (Api(xa, google, todoist).routes.orNotFound, closed)
+        yield (Api(xa, google, todoist, FreeTime(xa, google)).routes.orNotFound, closed)
 
     private def send(app: HttpApp[IO], method: Method, uri: Uri, body: Json = Json.Null) =
         app.run(Request[IO](method, uri).withEntity(body)).flatMap(res => res.as[Json].attempt.map(res.status -> _))
@@ -115,7 +123,7 @@ class ApiSuite extends munit.CatsEffectSuite:
         yield
             assertEquals(status, Status.Ok)
             assertEquals(c.downField("blocks").values.map(_.size), Some(1))
-            assertEquals(c.downField("errors").values.map(_.size), Some(2))
+            assertEquals(c.downField("errors").values.map(_.size), Some(3))
             assertEquals(c.downField("errors").downArray.get[String]("source"), Right("google"))
             assertEquals(c.downField("tasks").values.map(_.size), Some(0))
     }
@@ -208,4 +216,29 @@ class ApiSuite extends munit.CatsEffectSuite:
                 got.toOption.flatMap(_.hcursor.downField("weeklyWindows").downArray.get[Int]("startMinute").toOption),
                 Some(540)
             )
+    }
+
+    test("1 日の空きは活動可能時間から freeBusy と Block を引いたもの (設計書 7 章の計算例)") {
+        val block =
+            j("""{"requestId":"b","title":"作業","startAt":"2026-10-05T05:00:00Z","endAt":"2026-10-05T06:30:00Z"}""")
+        for
+            (app, _) <- setup()
+            _ <- send(app, Method.POST, uri"/api/blocks", block)
+            (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
+            free = day.toOption.get.hcursor.downField("freeIntervals").as[List[Map[String, String]]].toOption.get
+        yield assertEquals(
+            free.map(i => i("start") + "/" + i("end")),
+            List(
+                "2026-10-05T00:00:00Z/2026-10-05T01:00:00Z",
+                "2026-10-05T03:00:00Z/2026-10-05T05:00:00Z",
+                "2026-10-05T06:30:00Z/2026-10-05T09:00:00Z"
+            )
+        )
+    }
+
+    test("A13: freeBusy が取れないと本人画面の空きは null") {
+        for
+            (app, _) <- setup(failing = true)
+            (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
+        yield assertEquals(day.toOption.get.hcursor.downField("freeIntervals").focus.map(_.isNull), Some(true))
     }
