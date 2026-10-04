@@ -27,11 +27,18 @@ export interface Task {
     url: string;
 }
 
+export interface Interval {
+    start: string;
+    end: string;
+}
+
 export interface Day {
     date: string;
     events: CalendarEvent[];
     blocks: Block[];
     tasks: Task[];
+    /** Google の busy が取れなかったときは null。空配列とは区別する (A13)。 */
+    freeIntervals: Interval[] | null;
     fetchedAt: string;
     errors: { source: string; target: string; message: string }[];
 }
