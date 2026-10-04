@@ -4,9 +4,7 @@ import cats.effect.{IO, IOApp, Ref}
 import cats.syntax.all.*
 import com.comcast.ip4s.*
 import fs2.io.file.Path
-import io.circe.Json
 import org.http4s.{HttpRoutes, StaticFile}
-import org.http4s.circe.*
 import org.http4s.dsl.io.*
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
@@ -23,10 +21,10 @@ object Main extends IOApp.Simple:
                 _ <- Db.migrate(xa)
                 pending <- Ref.of[IO, Map[String, Auth.Pending]](Map.empty)
                 auth = Auth(cfg, xa, client, Crypto.Aead(cfg.tokenEncryptionKey), pending)
+                tokenCache <- Ref.of[IO, Option[(String, Long)]](None)
+                google = Google(cfg, client, auth.refreshToken, tokenCache)
                 public = HttpRoutes.of[IO] { case GET -> Root / "api" / "health" => Ok("ok") }
-                api = auth.protect(HttpRoutes.of[IO] { case GET -> Root / "api" / "me" =>
-                    Ok(Json.obj("ok" -> Json.True))
-                })
+                api = auth.protect(Api(xa, google).routes)
                 routes = public <+> auth.routes <+> api <+> cfg.staticDir.fold(HttpRoutes.empty[IO])(spa)
                 _ <- EmberServerBuilder
                     .default[IO]

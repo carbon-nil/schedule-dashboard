@@ -1,0 +1,170 @@
+package schedule
+
+import cats.effect.IO
+import cats.syntax.all.*
+import doobie.*
+import doobie.implicits.*
+import io.circe.syntax.*
+import io.circe.{Decoder, Encoder, Json}
+import org.http4s.*
+import org.http4s.circe.*
+import org.http4s.dsl.io.*
+
+import java.time.{Instant, LocalDate}
+import scala.util.Try
+
+/** 本人用の API (設計書 9 章)。認証は Auth.protect が前段で済ませる。 */
+final class Api(xa: Transactor[IO], google: Google):
+    import Api.*
+
+    val routes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+        case GET -> Root / "api" / "me" => Ok(Json.obj("ok" -> Json.True))
+
+        case GET -> Root / "api" / "day" :? DateParam(date) =>
+            Try(LocalDate.parse(date)).toOption.fold(invalid("date は YYYY-MM-DD で指定してください"))(day)
+
+        case GET -> Root / "api" / "calendars" =>
+            google.calendars.flatMap {
+                case Right(cs) => Ok(cs.map(c => CalendarDto(c.id, c.title, c.accessRole, c.primary)).asJson)
+                case Left(e)   => ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", e.message)
+            }
+
+        case GET -> Root / "api" / "settings" => settings.transact(xa).flatMap(s => Ok(s.asJson))
+
+        case req @ PUT -> Root / "api" / "settings" =>
+            withBody[SettingsInput](req) { in =>
+                if in.selectedCalendarIds.size > 50 then invalid("カレンダーは 50 個まで選べます")
+                else
+                    replaceSettings(in).transact(xa).flatMap {
+                        case Some(s) => Ok(s.asJson)
+                        case None    => conflict
+                    }
+            }
+
+        case req @ POST -> Root / "api" / "blocks" =>
+            withBody[BlockCreate](req) { in =>
+                validated(in.title, in.startAt, in.endAt) { (title, start, end) =>
+                    Blocks.create(in.requestId, title, start, end).transact(xa).flatMap(respond(Status.Created))
+                }
+            }
+
+        case req @ PATCH -> Root / "api" / "blocks" / id =>
+            withBody[BlockMove](req) { in =>
+                validated("-", in.startAt, in.endAt) { (_, start, end) =>
+                    Blocks.move(id, start, end, in.expectedVersion).transact(xa).flatMap(respond(Status.Ok))
+                }
+            }
+
+        case req @ DELETE -> Root / "api" / "blocks" / id =>
+            withBody[VersionInput](req) { in =>
+                Blocks.delete(id, in.expectedVersion).transact(xa).flatMap {
+                    case Change.Done(_)  => NoContent()
+                    case Change.NotFound => notFound
+                    case Change.Conflict => conflict
+                }
+            }
+    }
+
+    /** 外部の取得に失敗しても本人画面は返し、失敗を errors に載せる。空配列にはしない。 */
+    private def day(date: LocalDate): IO[Response[IO]] =
+        val range = Interval(
+            date.atStartOfDay(Availability.Zone).toInstant.toEpochMilli,
+            date.plusDays(1).atStartOfDay(Availability.Zone).toInstant.toEpochMilli
+        )
+        for
+            ids <- sql"SELECT calendar_id FROM selected_calendars".query[String].to[List].transact(xa)
+            fetched <- ids.parTraverse(id => google.events(id, range).map(id -> _))
+            blocks <- Blocks.inRange(range).transact(xa)
+            now <- IO.realTime
+            events = fetched.flatMap(_._2.toOption.toList.flatten)
+            errors = fetched.collect { case (id, Left(e)) => ErrorDto("google", id, e.message) }
+            res <- Ok(
+                DayDto(
+                    date.toString,
+                    events.sortBy(_.start).map(EventDto.from),
+                    blocks.map(BlockDto.from),
+                    iso(now.toMillis),
+                    errors
+                ).asJson
+            )
+        yield res
+
+    private def settings: ConnectionIO[SettingsDto] =
+        for
+            version <- sql"SELECT version FROM app_settings WHERE id = 1".query[Int].unique
+            ids <- sql"SELECT calendar_id FROM selected_calendars ORDER BY calendar_id".query[String].to[List]
+        yield SettingsDto(version, ids)
+
+    /** 一括置換。version が一致したときだけ置き換え、version を進める。 */
+    private def replaceSettings(in: SettingsInput): ConnectionIO[Option[SettingsDto]] =
+        sql"UPDATE app_settings SET version = version + 1 WHERE id = 1 AND version = ${in.expectedVersion}".update.run
+            .flatMap {
+                case 0 => FC.pure(None)
+                case _ =>
+                    sql"DELETE FROM selected_calendars".update.run *>
+                        in.selectedCalendarIds.distinct.traverse_(id =>
+                            sql"INSERT INTO selected_calendars (calendar_id) VALUES ($id)".update.run
+                        ) *> settings.map(Some(_))
+            }
+
+object Api:
+    object DateParam extends QueryParamDecoderMatcher[String]("date")
+
+    final case class BlockCreate(requestId: String, title: String, startAt: String, endAt: String) derives Decoder
+    final case class BlockMove(startAt: String, endAt: String, expectedVersion: Int) derives Decoder
+    final case class VersionInput(expectedVersion: Int) derives Decoder
+    final case class SettingsInput(expectedVersion: Int, selectedCalendarIds: List[String]) derives Decoder
+
+    final case class BlockDto(id: String, title: String, startAt: String, endAt: String, version: Int)
+        derives Encoder.AsObject
+    object BlockDto:
+        def from(b: Block): BlockDto = BlockDto(b.id, b.title, iso(b.start), iso(b.end), b.version)
+    final case class EventDto(
+        id: String,
+        calendarId: String,
+        title: String,
+        startAt: String,
+        endAt: String,
+        allDay: Boolean
+    ) derives Encoder.AsObject
+    object EventDto:
+        def from(e: CalendarEvent): EventDto = EventDto(e.id, e.calendarId, e.title, iso(e.start), iso(e.end), e.allDay)
+    final case class ErrorDto(source: String, target: String, message: String) derives Encoder.AsObject
+    final case class DayDto(
+        date: String,
+        events: List[EventDto],
+        blocks: List[BlockDto],
+        fetchedAt: String,
+        errors: List[ErrorDto]
+    ) derives Encoder.AsObject
+    final case class CalendarDto(id: String, title: String, accessRole: String, primary: Boolean)
+        derives Encoder.AsObject
+    final case class SettingsDto(settingsVersion: Int, selectedCalendarIds: List[String]) derives Encoder.AsObject
+
+    def iso(millis: Long): String = Instant.ofEpochMilli(millis).toString
+
+    private val notFound = ApiError(Status.NotFound, "NOT_FOUND", "見つかりません")
+    private val conflict = ApiError(Status.Conflict, "VERSION_CONFLICT", "ほかの操作で更新されています。再読み込みしてください")
+    private def invalid(message: String) = ApiError(Status.UnprocessableContent, "INVALID_INPUT", message)
+
+    private def respond(created: Status)(c: Change[Block]): IO[Response[IO]] = c match
+        case Change.Done(b)  => IO.pure(Response[IO](created).withEntity(BlockDto.from(b).asJson))
+        case Change.NotFound => notFound
+        case Change.Conflict => conflict
+
+    private def withBody[A: Decoder](req: Request[IO])(f: A => IO[Response[IO]]): IO[Response[IO]] =
+        req.attemptAs[Json].value.map(_.flatMap(_.as[A].left.map(e => e: Throwable))).flatMap {
+            case Right(a) => f(a)
+            case Left(_)  => invalid("入力の形式が正しくありません")
+        }
+
+    /** 日時は RFC3339、区間は start < end、タイトルは 1〜200 文字。 */
+    private def validated(title: String, startAt: String, endAt: String)(
+        f: (String, Long, Long) => IO[Response[IO]]
+    ): IO[Response[IO]] =
+        val t = title.trim
+        (Try(Instant.parse(startAt)).toOption, Try(Instant.parse(endAt)).toOption) match
+            case _ if t.isEmpty || t.length > 200    => invalid("タイトルは 1〜200 文字にしてください")
+            case (Some(s), Some(e)) if s.isBefore(e) => f(t, s.toEpochMilli, e.toEpochMilli)
+            case (Some(_), Some(_))                  => invalid("終了は開始より後にしてください")
+            case _                                   => invalid("日時は RFC3339 で指定してください")

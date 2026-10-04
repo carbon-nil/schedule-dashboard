@@ -9,7 +9,7 @@ import scala.io.Source
 
 object Db:
     // 適用順に並べる。追加したら末尾に足し、既存のファイルは書き換えない。
-    private val migrations = List("001_init.sql")
+    private val migrations = List("001_init.sql", "002_blocks.sql")
 
     /** foreign_keys・WAL・busy_timeout は接続ごとの設定なので、sqlite-jdbc の URL で毎回指定する。 */
     def transactor(path: String): Transactor[IO] =
