@@ -1,0 +1,14 @@
+node_modules/
+dist/
+target/
+.bsp/
+.bloop/
+.metals/
+.vscode/
+*.db
+*.db-shm
+*.db-wal
+.env
+.claude/worktrees/
+.claude/settings.local.json
+.devcontainer/*.local.*
