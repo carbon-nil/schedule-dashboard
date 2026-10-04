@@ -3,6 +3,15 @@ package schedule
 import java.time.LocalDateTime
 
 class AvailabilitySuite extends munit.FunSuite:
+    test("公開表示は開始を現在時刻へ切り詰め、分に丸め、最小連続時間未満を除く") {
+        val m = 60000L
+        val free = Seq(Interval(0, 100 * m), Interval(200 * m + 30000, 231 * m + 30000), Interval(300 * m, 310 * m))
+        assertEquals(
+            Availability.publicFree(free, now = 40 * m + 1, minMinutes = 30),
+            Seq(Interval(41 * m, 100 * m), Interval(201 * m, 231 * m))
+        )
+    }
+
     // 2026-10-05 は月曜日
     private def jst(hh: Int, mm: Int = 0, day: Int = 5): Long =
         LocalDateTime.of(2026, 10, day, hh, mm).atZone(Availability.Zone).toInstant.toEpochMilli

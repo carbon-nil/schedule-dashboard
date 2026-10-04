@@ -9,6 +9,7 @@ import org.http4s.circe.*
 import org.http4s.client.Client
 import org.http4s.dsl.io.*
 import org.http4s.implicits.*
+import cats.syntax.all.*
 
 import java.nio.file.Files
 
@@ -27,6 +28,7 @@ class ApiSuite extends munit.CatsEffectSuite:
             _ <- Db.migrate(xa)
             cache <- Ref.of[IO, Option[(String, Long)]](Some(("at", Long.MaxValue)))
             busyCache <- Ref.of[IO, Map[(List[String], Interval), (Long, List[Interval])]](Map.empty)
+            limits <- Ref.of[IO, Map[String, (Long, Int)]](Map.empty)
             closed <- Ref.of[IO, List[String]](Nil)
             client = Client.fromHttpApp[IO](HttpApp[IO] { req =>
                 val path = req.uri.path.renderString
@@ -56,7 +58,8 @@ class ApiSuite extends munit.CatsEffectSuite:
             _ <- sql"INSERT INTO selected_calendars VALUES ('primary')".update.run.transact(xa)
             // 月曜 9:00〜18:00
             _ <- sql"INSERT INTO weekly_windows VALUES ('w', 0, 540, 1080)".update.run.transact(xa)
-        yield (Api(xa, google, todoist, FreeTime(xa, google)).routes.orNotFound, closed)
+            api = Api(xa, google, todoist, FreeTime(xa, google), AuthSuite.cfg, RateLimit(limits))
+        yield ((api.publicRoutes <+> api.routes).orNotFound, closed)
 
     private def send(app: HttpApp[IO], method: Method, uri: Uri, body: Json = Json.Null) =
         app.run(Request[IO](method, uri).withEntity(body)).flatMap(res => res.as[Json].attempt.map(res.status -> _))
@@ -236,9 +239,89 @@ class ApiSuite extends munit.CatsEffectSuite:
         )
     }
 
-    test("A13: freeBusy が取れないと本人画面の空きは null") {
+    test("A13: freeBusy が取れないと本人画面の空きは null、共有プレビューと公開は 503") {
         for
             (app, _) <- setup(failing = true)
             (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
-        yield assertEquals(day.toOption.get.hcursor.downField("freeIntervals").focus.map(_.isNull), Some(true))
+            (preview, _) <- send(app, Method.POST, uri"/api/shares/preview", shareInput("p"))
+        yield
+            assertEquals(day.toOption.get.hcursor.downField("freeIntervals").focus.map(_.isNull), Some(true))
+            assertEquals(preview, Status.ServiceUnavailable)
+    }
+
+    private def shareInput(id: String) =
+        j(
+            s"""{"requestId":"$id","rangeStart":"2026-10-12T00:00:00Z","rangeEnd":"2026-10-12T12:00:00Z","minFreeMinutes":60}"""
+        )
+
+    test("共有: 作成応答だけが URL を返し、公開 API は日時だけを返す (A09)。失効後は 404 (A12)") {
+        for
+            (app, _) <- setup()
+            (created, body) <- send(app, Method.POST, uri"/api/shares", shareInput("s1"))
+            (dup, _) <- send(app, Method.POST, uri"/api/shares", shareInput("s1"))
+            url = body.toOption.flatMap(_.hcursor.get[String]("url").toOption).get
+            token = url.split("/share/").last
+            (_, list) <- send(app, Method.GET, uri"/api/shares")
+            (pub, dto) <- send(
+                app,
+                Method.GET,
+                Uri.unsafeFromString(s"/api/public/availability/$token?rangeEnd=2026-12-01T00:00:00Z")
+            )
+            keys = dto.toOption.flatMap(_.asObject).map(_.keys.toSet)
+            (revoked, _) <- send(app, Method.POST, uri"/api/shares/s1/revoke", j("""{"expectedVersion":1}"""))
+            (gone, _) <- send(app, Method.GET, Uri.unsafeFromString(s"/api/public/availability/$token"))
+            (unknown, _) <- send(app, Method.GET, uri"/api/public/availability/nope")
+        yield
+            assertEquals(created, Status.Created)
+            assert(url.startsWith("https://example.test/share/"))
+            assertEquals(dup, Status.Conflict)
+            assert(!list.toOption.get.noSpaces.contains(token), "管理一覧にトークンを出さない")
+            assertEquals(pub, Status.Ok)
+            assertEquals(
+                keys,
+                Some(Set("timezone", "computedAt", "externalFetchedAt", "rangeStart", "rangeEnd", "freeIntervals"))
+            )
+            // A23: クエリで期間を広げられない
+            assertEquals(dto.toOption.flatMap(_.hcursor.get[String]("rangeEnd").toOption), Some("2026-10-12T12:00:00Z"))
+            assertEquals(
+                dto.toOption
+                    .flatMap(_.hcursor.downField("freeIntervals").as[List[Map[String, String]]].toOption)
+                    .map(_.map(_("start"))),
+                Some(List("2026-10-12T00:00:00Z", "2026-10-12T03:00:00Z"))
+            )
+            assertEquals(revoked, Status.Ok)
+            assertEquals(gone, Status.NotFound)
+            assertEquals(unknown, Status.NotFound)
+    }
+
+    test("共有: 31 日超、期限が期間の後、過去の期間は 422。公開 API はリンクごとに 1 分 30 回まで") {
+        for
+            (app, _) <- setup()
+            (long, _) <- send(
+                app,
+                Method.POST,
+                uri"/api/shares/preview",
+                j("""{"rangeStart":"2026-10-12T00:00:00Z","rangeEnd":"2026-11-13T00:00:00Z"}""")
+            )
+            (late, _) <- send(
+                app,
+                Method.POST,
+                uri"/api/shares",
+                j(
+                    """{"requestId":"x","rangeStart":"2026-10-12T00:00:00Z","rangeEnd":"2026-10-12T12:00:00Z","expiresAt":"2026-10-13T00:00:00Z"}"""
+                )
+            )
+            (past, _) <- send(
+                app,
+                Method.POST,
+                uri"/api/shares",
+                j("""{"requestId":"y","rangeStart":"2020-01-01T00:00:00Z","rangeEnd":"2020-01-02T00:00:00Z"}""")
+            )
+            statuses <- (1 to 31).toList.traverse(_ => send(app, Method.GET, uri"/api/public/availability/t").map(_._1))
+        yield
+            assertEquals(long, Status.UnprocessableContent)
+            assertEquals(late, Status.UnprocessableContent)
+            assertEquals(past, Status.UnprocessableContent)
+            assertEquals(statuses.take(30).toSet, Set(Status.NotFound))
+            assertEquals(statuses.last, Status.TooManyRequests)
     }

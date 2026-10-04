@@ -9,6 +9,7 @@ import io.circe.{Decoder, Encoder, Json}
 import org.http4s.*
 import org.http4s.circe.*
 import org.http4s.dsl.io.*
+import org.typelevel.ci.*
 
 import java.time.{Instant, LocalDate}
 import java.util.UUID
@@ -19,7 +20,9 @@ final class Api(
     xa: Transactor[IO],
     google: Google,
     todoist: Todoist,
-    freeTime: FreeTime
+    freeTime: FreeTime,
+    cfg: Config,
+    limiter: RateLimit
 ):
     import Api.*
 
@@ -96,7 +99,96 @@ final class Api(
                     }
             }
 
+        // 共有 (設計書 5.5、9 章)。プレビューは公開と同じ計算をする
+        case req @ POST -> Root / "api" / "shares" / "preview" =>
+            withBody[SharePreview](req) { in =>
+                shareRange(in.rangeStart, in.rangeEnd, in.minFreeMinutes) { (range, min) =>
+                    publicDto(range, min).flatMap(_.fold(googleUnavailable, dto => Ok(dto.asJson)))
+                }
+            }
+
+        case req @ POST -> Root / "api" / "shares" =>
+            withBody[ShareCreate](req) { in =>
+                shareRange(in.rangeStart, in.rangeEnd, in.minFreeMinutes) { (range, min) =>
+                    IO.realTime.map(_.toMillis).flatMap { now =>
+                        val expires =
+                            in.expiresAt.fold(Option(range.end))(s => Try(Instant.parse(s).toEpochMilli).toOption)
+                        expires match
+                            case None                                 => invalid("期限は RFC3339 で指定してください")
+                            case Some(e) if e <= now || e > range.end =>
+                                invalid("期限は現在より後、共有期間の終了以前にしてください")
+                            case Some(e) =>
+                                val token = Crypto.randomToken()
+                                val share = Share(in.requestId, range.start, range.end, e, None, min, now, 1)
+                                Shares.create(in.requestId, Crypto.sha256(token), share).transact(xa).flatMap {
+                                    case Change.Done(s) =>
+                                        // 平文のトークンはこの応答でだけ返す
+                                        val body =
+                                            ShareDto.from(s).asJsonObject.add("url", Json.fromString(shareUrl(token)))
+                                        IO.pure(Response[IO](Status.Created).withEntity(Json.fromJsonObject(body)))
+                                    case Change.Conflict => conflict
+                                    case Change.NotFound => notFound
+                                }
+                    }
+                }
+            }
+
+        case GET -> Root / "api" / "shares" => Shares.list.transact(xa).flatMap(ss => Ok(ss.map(ShareDto.from).asJson))
+
+        case req @ POST -> Root / "api" / "shares" / id / "revoke" =>
+            withBody[VersionInput](req) { in =>
+                IO.realTime.map(_.toMillis).flatMap { now =>
+                    Shares.revoke(id, in.expectedVersion, now).transact(xa).flatMap {
+                        case Change.Done(s)  => Ok(ShareDto.from(s).asJson)
+                        case Change.NotFound => notFound
+                        case Change.Conflict => conflict
+                    }
+                }
+            }
     }
+
+    /** 認証なしの公開 API (設計書 10 章)。受け取るのはトークンだけで、期間やカレンダーは指定できない (A23)。 */
+    val publicRoutes: HttpRoutes[IO] = HttpRoutes.of[IO] {
+        case req @ GET -> Root / "api" / "public" / "availability" / token =>
+            val ip = req.headers
+                .get(ci"X-Forwarded-For")
+                .map(_.head.value.takeWhile(_ != ',').trim)
+                .orElse(req.remoteAddr.map(_.toString))
+                .getOrElse("-")
+            (limiter.allow(s"ip:$ip", 60), limiter.allow(s"token:${Crypto.sha256(token)}", 30)).tupled
+                .flatMap {
+                    case (ipOk, tokenOk) if !ipOk || !tokenOk =>
+                        ApiError(Status.TooManyRequests, "RATE_LIMITED", "しばらく待ってから開き直してください")
+                    case _ =>
+                        IO.realTime.map(_.toMillis).flatMap { now =>
+                            Shares.valid(Crypto.sha256(token), now).transact(xa).flatMap {
+                                // 失効・期限切れ・不明は同じ 404 (A12)
+                                case None    => ApiError(Status.NotFound, "NOT_FOUND", "このリンクは無効です")
+                                case Some(s) =>
+                                    publicDto(Interval(s.rangeStart, s.rangeEnd), s.minFreeMinutes).flatMap(
+                                        _.fold(googleUnavailable, dto => Ok(dto.asJson))
+                                    )
+                            }
+                        }
+                }
+                .map(_.putHeaders(Header.Raw(ci"Cache-Control", "no-store")))
+    }
+
+    /** 公開用 DTO は明示的に組み立てる。busy・内部 ID・タイトルを含めない (設計書 9 章)。 */
+    private def publicDto(range: Interval, minFreeMinutes: Int): IO[Either[GoogleError, PublicDto]] =
+        for
+            result <- freeTime.compute(range)
+            now <- IO.realTime.map(_.toMillis)
+        yield result.map { r =>
+            PublicDto(
+                "Asia/Tokyo",
+                iso(now),
+                iso(r.externalFetchedAt),
+                iso(range.start),
+                iso(range.end),
+                Availability.publicFree(r.free, now, minFreeMinutes).map(IntervalDto.from).toList
+            )
+        }
 
     /** 外部の取得に失敗しても本人画面は返し、失敗を errors に載せる。空配列にはしない。 */
     private def day(date: LocalDate): IO[Response[IO]] =
@@ -157,6 +249,8 @@ final class Api(
                         } *> settings.map(Some(_))
             }
 
+    private def shareUrl(token: String) = s"${cfg.baseUrl}/share/$token"
+
 object Api:
     object DateParam extends QueryParamDecoderMatcher[String]("date")
 
@@ -174,6 +268,14 @@ object Api:
         expectedVersion: Int,
         selectedCalendarIds: List[String],
         weeklyWindows: List[WindowDto]
+    ) derives Decoder
+    final case class SharePreview(rangeStart: String, rangeEnd: String, minFreeMinutes: Option[Int]) derives Decoder
+    final case class ShareCreate(
+        requestId: String,
+        rangeStart: String,
+        rangeEnd: String,
+        minFreeMinutes: Option[Int],
+        expiresAt: Option[String]
     ) derives Decoder
 
     final case class BlockDto(
@@ -228,6 +330,38 @@ object Api:
         selectedCalendarIds: List[String],
         weeklyWindows: List[WindowDto]
     ) derives Encoder.AsObject
+    final case class ShareDto(
+        id: String,
+        rangeStart: String,
+        rangeEnd: String,
+        expiresAt: String,
+        revokedAt: Option[String],
+        minFreeMinutes: Int,
+        createdAt: String,
+        version: Int
+    ) derives Encoder.AsObject
+    object ShareDto:
+        def from(s: Share): ShareDto = ShareDto(
+            s.id,
+            iso(s.rangeStart),
+            iso(s.rangeEnd),
+            iso(s.expiresAt),
+            s.revokedAt.map(iso),
+            s.minFreeMinutes,
+            iso(s.createdAt),
+            s.version
+        )
+
+    /** 公開レスポンス (設計書 9 章の例)。この型にない情報は出せない。 */
+    final case class PublicDto(
+        timezone: String,
+        computedAt: String,
+        externalFetchedAt: String,
+        rangeStart: String,
+        rangeEnd: String,
+        freeIntervals: List[IntervalDto]
+    ) derives Encoder.AsObject
+
     def iso(millis: Long): String = Instant.ofEpochMilli(millis).toString
 
     private val notFound = ApiError(Status.NotFound, "NOT_FOUND", "見つかりません")
@@ -235,6 +369,10 @@ object Api:
     private def invalid(message: String) = ApiError(Status.UnprocessableContent, "INVALID_INPUT", message)
     private def todoistUnavailable(e: TodoistError) =
         ApiError(Status.ServiceUnavailable, "TODOIST_UNAVAILABLE", e.message)
+    // 取得できないときは 503 で「現在確認できません」。空の busy から全部空きを作らない (設計書 7 章)
+    private def googleUnavailable(e: GoogleError) =
+        ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", s"現在確認できません: ${e.message}")
+
     private def respond(created: Status)(c: Change[Block]): IO[Response[IO]] = c match
         case Change.Done(b)  => IO.pure(Response[IO](created).withEntity(BlockDto.from(b).asJson))
         case Change.NotFound => notFound
@@ -252,6 +390,18 @@ object Api:
             case (Some(s), Some(e)) if s.isBefore(e) => f(s.toEpochMilli, e.toEpochMilli)
             case (Some(_), Some(_))                  => invalid("終了は開始より後にしてください")
             case _                                   => invalid("日時は RFC3339 で指定してください")
+
+    /** 共有期間は 31 日以内、最小連続時間は 1〜1440 分 (初期値 30)。 */
+    private def shareRange(startAt: String, endAt: String, minFreeMinutes: Option[Int])(
+        f: (Interval, Int) => IO[Response[IO]]
+    ): IO[Response[IO]] =
+        val min = minFreeMinutes.getOrElse(30)
+        if min < 1 || min > 1440 then invalid("最小連続時間は 1〜1440 分にしてください")
+        else
+            validRange(startAt, endAt) { (s, e) =>
+                if e - s > 31L * 24 * 60 * 60000 then invalid("共有期間は 31 日以内にしてください")
+                else f(Interval(s, e), min)
+            }
 
     /** 曜日 0〜6、0 <= 開始 < 終了 <= 1440、同じ曜日で重ならない (設計書 5.2)。 */
     private def windowsError(ws: List[WindowDto]): Option[String] =
