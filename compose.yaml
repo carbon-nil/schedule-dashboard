@@ -1,0 +1,14 @@
+# 本番用。秘密情報を含む設定値はリポジトリの外のファイルから読む (README の「配備」を参照)。
+services:
+    app:
+        build: .
+        restart: unless-stopped
+        env_file: ${HOME}/.config/schedule-dashboard/env
+        # Cloudflare Tunnel など、同じマシンのリバースプロキシからだけ届くようにする。
+        ports:
+            - "127.0.0.1:8080:8080"
+        volumes:
+            - data:/data
+
+volumes:
+    data:

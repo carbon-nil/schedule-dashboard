@@ -1,0 +1,51 @@
+{
+    "name": "schedule-dashboard",
+    "build": { "dockerfile": "Dockerfile" },
+    "remoteUser": "vscode",
+    "features": {
+        "ghcr.io/devcontainers/features/java:1": {
+            "version": "21",
+            "jdkDistro": "tem"
+        },
+        "ghcr.io/devcontainers/features/node:1": {
+            "version": "22"
+        },
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+    "mounts": [
+        "source=schedule-dashboard-cache,target=/home/vscode/.cache,type=volume",
+        "source=schedule-dashboard-sbt,target=/home/vscode/.sbt,type=volume",
+        "source=schedule-dashboard-ivy,target=/home/vscode/.ivy2,type=volume"
+    ],
+    "postCreateCommand": "bash .devcontainer/postCreate.sh",
+    "postStartCommand": "if [ -f .devcontainer/postStart.local.sh ]; then bash .devcontainer/postStart.local.sh; fi",
+    "forwardPorts": [3000],
+    "portsAttributes": {
+        "3000": {
+            "label": "frontend",
+            "onAutoForward": "openBrowserOnce"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "scalameta.metals",
+                "dbaeumer.vscode-eslint",
+                "esbenp.prettier-vscode",
+                "bradlc.vscode-tailwindcss",
+                "EditorConfig.EditorConfig",
+                // The java feature adds the Java pack; there is no Java source, and Metals handles Scala.
+                "-vscjava.vscode-java-pack"
+            ],
+            "settings": {
+                "files.watcherExclude": {
+                    "**/target/**": true,
+                    "**/.bloop/**": true,
+                    "**/.metals/**": true,
+                    "**/.bsp/**": true,
+                    "**/node_modules/**": true
+                }
+            }
+        }
+    }
+}

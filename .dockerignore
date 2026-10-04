@@ -1,0 +1,9 @@
+**/node_modules
+**/target
+**/dist
+**/.bsp
+**/.metals
+**/.bloop
+.claude
+.git
+*.db*
