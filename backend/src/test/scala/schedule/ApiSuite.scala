@@ -46,6 +46,8 @@ class ApiSuite extends munit.CatsEffectSuite:
             google = Google(AuthSuite.cfg, client, IO.pure(Some("rt")), cache)
             todoist = Todoist(Some("token"), client)
             _ <- sql"INSERT INTO selected_calendars VALUES ('primary')".update.run.transact(xa)
+            // 月曜 9:00〜18:00
+            _ <- sql"INSERT INTO weekly_windows VALUES ('w', 0, 540, 1080)".update.run.transact(xa)
         yield (Api(xa, google, todoist).routes.orNotFound, closed)
 
     private def send(app: HttpApp[IO], method: Method, uri: Uri, body: Json = Json.Null) =
@@ -173,14 +175,27 @@ class ApiSuite extends munit.CatsEffectSuite:
                 app,
                 Method.PUT,
                 uri"/api/settings",
-                j("""{"expectedVersion":1,"selectedCalendarIds":["a","b"]}""")
+                j(
+                    """{"expectedVersion":1,"selectedCalendarIds":["a","b"],
+                      "weeklyWindows":[{"weekday":1,"startMinute":780,"endMinute":1080},{"weekday":1,"startMinute":540,"endMinute":720}]}"""
+                )
             )
             (stale, _) <- send(
                 app,
                 Method.PUT,
                 uri"/api/settings",
-                j("""{"expectedVersion":1,"selectedCalendarIds":["c"]}""")
+                j("""{"expectedVersion":1,"selectedCalendarIds":["c"],"weeklyWindows":[]}""")
             )
+            (overlap, _) <- send(
+                app,
+                Method.PUT,
+                uri"/api/settings",
+                j(
+                    """{"expectedVersion":2,"selectedCalendarIds":[],
+                      "weeklyWindows":[{"weekday":1,"startMinute":540,"endMinute":720},{"weekday":1,"startMinute":700,"endMinute":800}]}"""
+                )
+            )
+            (_, got) <- send(app, Method.GET, uri"/api/settings")
         yield
             assertEquals(ok, Status.Ok)
             assertEquals(
@@ -188,4 +203,9 @@ class ApiSuite extends munit.CatsEffectSuite:
                 Some(List("a", "b"))
             )
             assertEquals(stale, Status.Conflict)
+            assertEquals(overlap, Status.UnprocessableContent)
+            assertEquals(
+                got.toOption.flatMap(_.hcursor.downField("weeklyWindows").downArray.get[Int]("startMinute").toOption),
+                Some(540)
+            )
     }

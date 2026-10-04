@@ -11,6 +11,7 @@ import org.http4s.circe.*
 import org.http4s.dsl.io.*
 
 import java.time.{Instant, LocalDate}
+import java.util.UUID
 import scala.util.Try
 
 /** 本人用の API (設計書 9 章)。認証は Auth.protect が前段で済ませる。 */
@@ -35,10 +36,13 @@ final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
             withBody[SettingsInput](req) { in =>
                 if in.selectedCalendarIds.size > 50 then invalid("カレンダーは 50 個まで選べます")
                 else
-                    replaceSettings(in).transact(xa).flatMap {
-                        case Some(s) => Ok(s.asJson)
-                        case None    => conflict
-                    }
+                    windowsError(in.weeklyWindows) match
+                        case Some(message) => invalid(message)
+                        case None          =>
+                            replaceSettings(in).transact(xa).flatMap {
+                                case Some(s) => Ok(s.asJson)
+                                case None    => conflict
+                            }
             }
 
         case req @ POST -> Root / "api" / "blocks" =>
@@ -86,6 +90,7 @@ final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
                         case Left(e)   => todoistUnavailable(e)
                     }
             }
+
     }
 
     /** 外部の取得に失敗しても本人画面は返し、失敗を errors に載せる。空配列にはしない。 */
@@ -120,7 +125,8 @@ final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
         for
             version <- sql"SELECT version FROM app_settings WHERE id = 1".query[Int].unique
             ids <- sql"SELECT calendar_id FROM selected_calendars ORDER BY calendar_id".query[String].to[List]
-        yield SettingsDto(version, ids)
+            windows <- FreeTime.windows
+        yield SettingsDto(version, ids, windows.map(w => WindowDto(w.weekday, w.startMinute, w.endMinute)))
 
     /** 一括置換。version が一致したときだけ置き換え、version を進める。 */
     private def replaceSettings(in: SettingsInput): ConnectionIO[Option[SettingsDto]] =
@@ -131,7 +137,13 @@ final class Api(xa: Transactor[IO], google: Google, todoist: Todoist):
                     sql"DELETE FROM selected_calendars".update.run *>
                         in.selectedCalendarIds.distinct.traverse_(id =>
                             sql"INSERT INTO selected_calendars (calendar_id) VALUES ($id)".update.run
-                        ) *> settings.map(Some(_))
+                        ) *>
+                        sql"DELETE FROM weekly_windows".update.run *>
+                        in.weeklyWindows.traverse_ { w =>
+                            val id = UUID.randomUUID().toString
+                            sql"""INSERT INTO weekly_windows (id, weekday, start_minute, end_minute)
+                                  VALUES ($id, ${w.weekday}, ${w.startMinute}, ${w.endMinute})""".update.run
+                        } *> settings.map(Some(_))
             }
 
 object Api:
@@ -146,7 +158,12 @@ object Api:
     ) derives Decoder
     final case class BlockMove(startAt: String, endAt: String, expectedVersion: Int) derives Decoder
     final case class VersionInput(expectedVersion: Int) derives Decoder
-    final case class SettingsInput(expectedVersion: Int, selectedCalendarIds: List[String]) derives Decoder
+    final case class WindowDto(weekday: Int, startMinute: Int, endMinute: Int) derives Decoder, Encoder.AsObject
+    final case class SettingsInput(
+        expectedVersion: Int,
+        selectedCalendarIds: List[String],
+        weeklyWindows: List[WindowDto]
+    ) derives Decoder
 
     final case class BlockDto(
         id: String,
@@ -191,8 +208,11 @@ object Api:
     ) derives Encoder.AsObject
     final case class CalendarDto(id: String, title: String, accessRole: String, primary: Boolean)
         derives Encoder.AsObject
-    final case class SettingsDto(settingsVersion: Int, selectedCalendarIds: List[String]) derives Encoder.AsObject
-
+    final case class SettingsDto(
+        settingsVersion: Int,
+        selectedCalendarIds: List[String],
+        weeklyWindows: List[WindowDto]
+    ) derives Encoder.AsObject
     def iso(millis: Long): String = Instant.ofEpochMilli(millis).toString
 
     private val notFound = ApiError(Status.NotFound, "NOT_FOUND", "見つかりません")
@@ -200,7 +220,6 @@ object Api:
     private def invalid(message: String) = ApiError(Status.UnprocessableContent, "INVALID_INPUT", message)
     private def todoistUnavailable(e: TodoistError) =
         ApiError(Status.ServiceUnavailable, "TODOIST_UNAVAILABLE", e.message)
-
     private def respond(created: Status)(c: Change[Block]): IO[Response[IO]] = c match
         case Change.Done(b)  => IO.pure(Response[IO](created).withEntity(BlockDto.from(b).asJson))
         case Change.NotFound => notFound
@@ -218,3 +237,13 @@ object Api:
             case (Some(s), Some(e)) if s.isBefore(e) => f(s.toEpochMilli, e.toEpochMilli)
             case (Some(_), Some(_))                  => invalid("終了は開始より後にしてください")
             case _                                   => invalid("日時は RFC3339 で指定してください")
+
+    /** 曜日 0〜6、0 <= 開始 < 終了 <= 1440、同じ曜日で重ならない (設計書 5.2)。 */
+    private def windowsError(ws: List[WindowDto]): Option[String] =
+        val sorted = ws.sortBy(w => (w.weekday, w.startMinute))
+        if ws.exists(w => w.weekday < 0 || w.weekday > 6) then Some("曜日は 0 (月) 〜 6 (日) で指定してください")
+        else if ws.exists(w => w.startMinute < 0 || w.startMinute >= w.endMinute || w.endMinute > 1440) then
+            Some("時刻は 0 <= 開始 < 終了 <= 1440 分にしてください")
+        else if sorted.lazyZip(sorted.drop(1)).exists((a, b) => a.weekday == b.weekday && a.endMinute > b.startMinute)
+        then Some("同じ曜日の活動可能時間が重なっています")
+        else None
