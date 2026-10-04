@@ -165,8 +165,9 @@ final class Api(
                                 // 失効・期限切れ・不明は同じ 404 (A12)
                                 case None    => ApiError(Status.NotFound, "NOT_FOUND", "このリンクは無効です")
                                 case Some(s) =>
+                                    // 公開側には理由 (カレンダー ID など) を出さない (設計書 9 章)
                                     publicDto(Interval(s.rangeStart, s.rangeEnd), s.minFreeMinutes).flatMap(
-                                        _.fold(googleUnavailable, dto => Ok(dto.asJson))
+                                        _.fold(_ => publicUnavailable, dto => Ok(dto.asJson))
                                     )
                             }
                         }
@@ -372,6 +373,7 @@ object Api:
     // 取得できないときは 503 で「現在確認できません」。空の busy から全部空きを作らない (設計書 7 章)
     private def googleUnavailable(e: GoogleError) =
         ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", s"現在確認できません: ${e.message}")
+    private val publicUnavailable = ApiError(Status.ServiceUnavailable, "GOOGLE_UNAVAILABLE", "現在確認できません")
 
     private def respond(created: Status)(c: Change[Block]): IO[Response[IO]] = c match
         case Change.Done(b)  => IO.pure(Response[IO](created).withEntity(BlockDto.from(b).asJson))

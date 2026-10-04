@@ -239,14 +239,22 @@ class ApiSuite extends munit.CatsEffectSuite:
         )
     }
 
-    test("A13: freeBusy が取れないと本人画面の空きは null、共有プレビューと公開は 503") {
+    test("A13: freeBusy が取れないと本人画面の空きは null、共有プレビューと公開は 503。公開側は理由を出さない") {
         for
             (app, _) <- setup(failing = true)
             (_, day) <- send(app, Method.GET, uri"/api/day?date=2026-10-05")
             (preview, _) <- send(app, Method.POST, uri"/api/shares/preview", shareInput("p"))
+            (_, created) <- send(app, Method.POST, uri"/api/shares", shareInput("s"))
+            token = created.toOption.flatMap(_.hcursor.get[String]("url").toOption).get.split("/share/").last
+            (pub, body) <- send(app, Method.GET, Uri.unsafeFromString(s"/api/public/availability/$token"))
         yield
             assertEquals(day.toOption.get.hcursor.downField("freeIntervals").focus.map(_.isNull), Some(true))
             assertEquals(preview, Status.ServiceUnavailable)
+            assertEquals(pub, Status.ServiceUnavailable)
+            assertEquals(
+                body.toOption.flatMap(_.hcursor.downField("error").get[String]("message").toOption),
+                Some("現在確認できません")
+            )
     }
 
     private def shareInput(id: String) =
