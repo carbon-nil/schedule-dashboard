@@ -32,6 +32,7 @@ npm run dev --prefix frontend   # http://localhost:3000 (/api と /auth は 8080
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud の OAuth クライアント                                                   |
 | `OWNER_GOOGLE_SUB`                          | ログインを許すただ 1 人の Google アカウントの subject ID                             |
 | `TOKEN_ENCRYPTION_KEY`                      | refresh token を暗号化する 32 バイトの鍵（base64）。`openssl rand -base64 32` で作る |
+| `TODOIST_API_TOKEN`                         | Todoist の個人 API トークン。省略すると Todoist なしで動く（タスク欄に案内が出る）   |
 
 ### Google OAuth クライアントの作り方
 
@@ -40,6 +41,10 @@ npm run dev --prefix frontend   # http://localhost:3000 (/api と /auth は 8080
 3. 公開ステータスを「本番環境」にする。「テスト」のままだと refresh token が 7 日で失効する。自分だけが使うアプリなので、未確認アプリの警告が出ても続行できる。
 4. 「クライアント」で種類「ウェブ アプリケーション」を作り、承認済みのリダイレクト URI に `<BASE_URL>/auth/callback` を登録する。開発用に `http://localhost:3000/auth/callback` も足してよい。
 5. `OWNER_GOOGLE_SUB` は、最初は仮の値（`unknown` など）で起動してログインすると分かる。403 のエラーに自分の `sub` が出るので、その値に書き換えて再起動する。
+
+### Todoist のトークン
+
+Todoist の「設定」→「連携機能」→「開発者」にある API トークンを `TODOIST_API_TOKEN` に入れる。所有者 1 人のため OAuth は使わない。
 
 ## 配備
 

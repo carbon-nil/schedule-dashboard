@@ -59,13 +59,15 @@ docker build -t schedule-dashboard:dev .   # 本番イメージ。起動して /
 | PR3 | Todoist の一覧と完了、Block とタスクの紐付け                                                                                                    | A03、A14、A22、A26、A27          |
 | PR4 | 活動可能時間の設定、freeBusy、空き時間の表示、共有リンク                                                                                        | A08〜A13、A23                    |
 
-PR2 では Todoist がまだないため、Block にタイトル列を一時的に持たせた。これは設計書 5.3 からのずれで、PR3 で Todoist 参照に置き換えるか残すかを決める。PR2 では表示カレンダーの選択も先に入れた（選ばないと予定が出ないため）。
+PR2 では Todoist がまだないため、Block にタイトル列を持たせた。PR3 でタスク参照を足したあとも、Todoist を使わないときのためにタイトルは残した（どちらか一方だけ持つ）。PR2 では表示カレンダーの選択も先に入れた（選ばないと予定が出ないため）。
 
 PR1 と PR2 は同じブランチ `worktree-pr1-scaffold` に積み、PR #1 にまとめた。セッションが worktree に入ったままでは、ExitWorktree をユーザーの指示なしに呼べず、新しい worktree を作れなかったため。
 
 ## 設計書からのずれ
 
 - 認証ライブラリを使わず、Google OAuth のコード交換を自前で書いた（`backend/src/main/scala/schedule/Auth.scala`）。ID トークンはトークンエンドポイントから TLS で直接受け取るので署名検証を省き、iss・aud・exp・nonce を検証する。PKCE と state も使う。セッションは `sessions` 表にトークンの SHA-256 を保存する。
+- Block はタスク参照のほかにタイトルも持てる（`003_block_task.sql` の CHECK でどちらか一方）。Todoist のトークンがなくても作業計画を置けるようにするため。設計書 5.3 ではタスク参照だけ。
+- Todoist のタスクの URL は API が返さないので、`https://app.todoist.com/app/task/<id>` を組み立てている（API 資料の「Task URLs」の形式）。
 - Tapir は入れていない。API 型を TypeScript へ生成する必要が出たら入れる。
 - SQLite の毎日のバックアップ（設計書 14 章）はまだない。PR4 の後に足す。
 
@@ -81,3 +83,4 @@ PR1 と PR2 は同じブランチ `worktree-pr1-scaffold` に積み、PR #1 に�
 - 2026-10-04: `claude-init-category personal --account carbon-nil` でカテゴリを作り、`gh repo create --public --license mit` でリポジトリを作成した。`gh repo create` と `git clone` を `git -C` と同じコマンドでつないだところ git-guard に拒否されたので、`git -C` を外して再実行した。
 - 2026-10-04: PR1 を実装した。backend のテスト 16 件、frontend の lint、本番イメージのビルドと起動確認（health、未ログイン時 401、画面配信、Google へのリダイレクト）が通った。起動確認で、`protect` が `/api` 以外にも 401 を返す不具合を見つけて直した。実際の Google ログインは OAuth クライアントがまだないので試していない。
 - 2026-10-04: PR2 を実装し、PR #1 に積んだ。backend のテストは 25 件。Playwright の Docker イメージ（`mcr.microsoft.com/playwright/python`、`pip install playwright` が別に要る）で、ブラウザのタイムゾーンを米国東部にして画面を確かめた。ブロックは日本時間の位置に出て、フォームで「10:00 開始・30 分」と入れると UTC 01:00〜01:30 で保存された。FullCalendar v7 は要素に `.fc-event` クラスを付けないので、テストの選択子は文字で探す。次の作業は、ユーザーが OAuth クライアントを作って実際にログインできるかの確認と、PR3（Todoist）。
+- 2026-10-04: PR3（Todoist）を実装した。backend のテストは 31 件。Todoist API v1 の形は公式資料のページに埋め込まれた OpenAPI 定義（`ItemSyncView`）で確かめた。タスク一覧は `GET /api/v1/tasks` の `results` と `next_cursor`、完了は `POST /api/v1/tasks/{id}/close`、単件取得は完了済みだと 404。本番イメージを起動し、トークン未設定でもタスク参照の Block が「完了または削除されたタスク」として出て、タイトルの Block も作れることを確かめた。実際の Todoist トークンでの確認はユーザーが行う。次の作業は PR4（活動可能時間、freeBusy、空き時間、共有リンク）。
