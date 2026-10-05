@@ -10,7 +10,7 @@ Google Calendar の予定と自分の作業計画を一画面で見て、空き�
 
 ## 開発環境
 
-Docker と VS Code の Dev Containers 拡張で「Reopen in Container」を選ぶと、JDK・sbt・Node.js と依存パッケージが入る。
+Docker と VS Code の Dev Containers 拡張で「Reopen in Container」を選ぶと、JDK・sbt・Node.js・sqlite3・依存パッケージ、Claude Code と Codex CLI が入る。開発用の DB のファイルは volume（`/data`）に置くので、`DATABASE_PATH=/data/schedule.db` にする。
 
 ```bash
 cd backend && sbt test          # テスト

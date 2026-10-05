@@ -1,0 +1,31 @@
+services:
+    workspace:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        command: sleep infinity
+        volumes:
+            - ..:/workspaces/schedule-dashboard:cached
+            - node-modules-root:/workspaces/schedule-dashboard/node_modules
+            - node-modules-frontend:/workspaces/schedule-dashboard/frontend/node_modules
+            - jvm-cache:/home/vscode/.cache
+            - sbt-home:/home/vscode/.sbt
+            - ivy-home:/home/vscode/.ivy2
+            # Claude Code and Codex logins survive rebuilds.
+            - claude-config:/home/vscode/.claude
+            - codex-home:/home/vscode/.codex
+            # SQLite database files for development, at the same path the backend uses in production.
+            - sqlite-data:/data
+        environment:
+            # Keeps ~/.claude.json (login state) inside the claude-config volume, as in the official devcontainer.
+            CLAUDE_CONFIG_DIR: /home/vscode/.claude
+
+volumes:
+    node-modules-root:
+    node-modules-frontend:
+    jvm-cache:
+    sbt-home:
+    ivy-home:
+    claude-config:
+    codex-home:
+    sqlite-data:

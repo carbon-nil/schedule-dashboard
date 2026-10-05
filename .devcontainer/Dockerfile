@@ -4,8 +4,9 @@ ARG TARGETARCH
 ARG SBT_VERSION=1.13.0
 ARG SCALAFMT_VERSION=3.11.5
 
+# python3: the base image only has python3-minimal, which lacks the stdlib the Jev hook needs (shlex)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sqlite3 unzip \
+    && apt-get install -y --no-install-recommends python3 sqlite3 unzip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
