@@ -18,7 +18,7 @@ class DbSuite extends munit.CatsEffectSuite:
             mode <- sql"PRAGMA journal_mode".query[String].unique.transact(xa)
             settings <- sql"SELECT count(*) FROM app_settings".query[Int].unique.transact(xa)
         yield
-            assertEquals(version, 3)
+            assertEquals(version, 4)
             assertEquals(fk, 1)
             assertEquals(mode, "wal")
             assertEquals(settings, 1)
