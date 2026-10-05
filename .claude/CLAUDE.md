@@ -41,12 +41,14 @@
 検証コマンドは次のとおり。
 
 ```bash
-cd backend && sbt scalafmtCheckAll test
-npm run lint --prefix frontend
+cd backend && sbt scalafmtCheckAll scalafmtSbtCheck "scalafixAll --check" test
+npm ci && npx prettier --check . && npm run lint --prefix frontend && npm run build --prefix frontend
 docker build -t schedule-dashboard:dev .   # 本番イメージ。起動して /api/health と画面配信を確かめる
 ```
 
-このマシンには devcontainer CLI も JDK もない。sbt は `sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_1.13.0_3.3.8` イメージを `docker run -u $(id -u):$(id -g)` で動かし、worktree を mount して実行する。キャッシュは `~/.cache/schedule-dashboard-sbt` に置く。
+同じものを GitHub Actions（`.github/workflows/ci.yml`）が PR と master で回す。ツールの構成（Scala と scalafix、Node と ESLint、devcontainer、CI）は `haiiro2gou/karman` に合わせており、karman 側が変わったら追従する。
+
+このマシンには devcontainer CLI も JDK もない。sbt は `sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_1.13.0_3.9.0` イメージを `docker run -u $(id -u):$(id -g)` で動かし、worktree を mount して実行する。キャッシュは `~/.cache/schedule-dashboard-sbt` に置く。
 
 ## PR の順序
 
@@ -87,3 +89,4 @@ PR1 と PR2 は同じブランチ `worktree-pr1-scaffold` に積み、PR #1 に�
 - 2026-10-04: PR3（Todoist）を実装した。backend のテストは 31 件。Todoist API v1 の形は公式資料のページに埋め込まれた OpenAPI 定義（`ItemSyncView`）で確かめた。タスク一覧は `GET /api/v1/tasks` の `results` と `next_cursor`、完了は `POST /api/v1/tasks/{id}/close`、単件取得は完了済みだと 404。本番イメージを起動し、トークン未設定でもタスク参照の Block が「完了または削除されたタスク」として出て、タイトルの Block も作れることを確かめた。実際の Todoist トークンでの確認はユーザーが行う。次の作業は PR4（活動可能時間、freeBusy、空き時間、共有リンク）。
 - 2026-10-05: PR4（活動可能時間、freeBusy、空き時間、共有リンク）を実装した。backend のテストは 38 件。A09 は公開応答のキー集合で、A12・A13・A23 と回数制限は API のテストで確かめた。本番イメージを起動し、Google 未接続では空き時間が「確認できません」になり、プレビューが 503、不明なトークンの共有ページが 404 の表示とヘッダー（no-store、no-referrer、noindex）になることを確かめた。実際の Google アカウントでの freeBusy と共有ページの確認はユーザーが行う。残りは SQLite の毎日のバックアップ。
 - 2026-10-05: PR #3 に Codex の adversarial review（`/codex:adversarial-review master`。`/codex:review` は引数を取れず作業ツリーだけを見る）を掛けた。指摘 2 件を直した: 公開 API で IP の上限を先に見ず不明なトークンごとにカウンターを作っていた点（有効な共有にだけ割り当て、キー数に上限）と、共有ページで日をまたぐ空きを開始日の下に「22:00–02:00」と出していた点（日本時間の日付で分け、終了は 24:00 と出す）。
+- 2026-10-05: karman の現在の構成に追従した（Scala 3.9.0 と scalafix、doobie RC12 などの更新、Node 24・ESLint 10・TypeScript 6・Vite 8、compose 構成の devcontainer、CI）。`@haiiro2gou/eslint-config` 2.0.0 の react プリセットは `import * as React from "react"` と `React.useState` の形を要求するので、合わせて直した。PR #3（空き時間と共有リンク）はこの変更より前のブランチなので、マージ後に `WindowSettings.tsx`、`FreeTime.tsx`、`SharePanel.tsx`、`SharePage.tsx` にも同じ直しが要る。tapir と flyway は karman にあるがこの repo では使わない。prettier と editorconfig の設定も karman と差があるが、全ファイルの整形し直しになるので据え置いた。

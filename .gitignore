@@ -4,7 +4,8 @@ target/
 .bsp/
 .bloop/
 .metals/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.db
 *.db-shm
 *.db-wal

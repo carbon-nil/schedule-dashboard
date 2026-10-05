@@ -1,6 +1,15 @@
 {
     "name": "schedule-dashboard",
-    "build": { "dockerfile": "Dockerfile" },
+    "dockerComposeFile": ["compose.yaml", "compose.local.yaml"],
+    "initializeCommand": [
+        "sh",
+        "-c",
+        "if [ ! -e \"$1\" ]; then printf 'services: {}' > \"$1\"; fi",
+        "--",
+        "${localWorkspaceFolder}/.devcontainer/compose.local.yaml"
+    ],
+    "service": "workspace",
+    "workspaceFolder": "/workspaces/schedule-dashboard",
     "remoteUser": "vscode",
     "features": {
         "ghcr.io/devcontainers/features/java:1": {
@@ -8,15 +17,11 @@
             "jdkDistro": "tem"
         },
         "ghcr.io/devcontainers/features/node:1": {
-            "version": "22"
+            "version": "24"
         },
-        "ghcr.io/devcontainers/features/github-cli:1": {}
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
     },
-    "mounts": [
-        "source=schedule-dashboard-cache,target=/home/vscode/.cache,type=volume",
-        "source=schedule-dashboard-sbt,target=/home/vscode/.sbt,type=volume",
-        "source=schedule-dashboard-ivy,target=/home/vscode/.ivy2,type=volume"
-    ],
     "postCreateCommand": "bash .devcontainer/postCreate.sh",
     "postStartCommand": "if [ -f .devcontainer/postStart.local.sh ]; then bash .devcontainer/postStart.local.sh; fi",
     "forwardPorts": [3000],
@@ -32,6 +37,10 @@
                 "scalameta.metals",
                 "dbaeumer.vscode-eslint",
                 "esbenp.prettier-vscode",
+                "mtxr.sqltools",
+                "mtxr.sqltools-driver-sqlite",
+                "ms-azuretools.vscode-containers",
+                "anthropic.claude-code",
                 "bradlc.vscode-tailwindcss",
                 "EditorConfig.EditorConfig",
                 // The java feature adds the Java pack; there is no Java source, and Metals handles Scala.
@@ -44,7 +53,14 @@
                     "**/.metals/**": true,
                     "**/.bsp/**": true,
                     "**/node_modules/**": true
-                }
+                },
+                "sqltools.connections": [
+                    {
+                        "name": "schedule-dashboard (dev)",
+                        "driver": "SQLite",
+                        "database": "/data/schedule.db"
+                    }
+                ]
             }
         }
     }

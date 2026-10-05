@@ -1,29 +1,37 @@
-import { essentials, typescript } from "@haiiro2gou/eslint-config";
-import reactHooks from "eslint-plugin-react-hooks";
-import reactRefresh from "eslint-plugin-react-refresh";
+import js from "@eslint/js";
 import globals from "globals";
+import reactRefresh from "eslint-plugin-react-refresh";
+import tseslint from "typescript-eslint";
+import { globalIgnores } from "eslint/config";
+import { essentials, node, typescript, react } from "@haiiro2gou/eslint-config";
 
-export default [
-    { ignores: ["dist"] },
+export default tseslint.config([
+    globalIgnores(["dist", "vite.config.ts", "eslint.config.js"]),
     ...essentials,
+    ...node,
     ...typescript,
-    reactHooks.configs.flat["recommended-latest"],
-    reactRefresh.configs.vite,
+    ...react,
     {
         files: ["**/*.{ts,tsx}"],
+        extends: [js.configs.recommended, reactRefresh.configs.vite],
         languageOptions: {
+            ecmaVersion: 2020,
             globals: globals.browser,
-            parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+            parserOptions: {
+                project: ["./tsconfig.json"],
+            },
         },
+        // ブラウザで動くコードだが node プリセットが組み込み API の対応版を見るので、engines と同じ版にそろえる
+        settings: { node: { version: ">=24" } },
     },
     {
-        // React components must be PascalCase for JSX.
+        // React のコンポーネントは JSX のために PascalCase にする
         files: ["**/*.tsx"],
         rules: {
             "@typescript-eslint/naming-convention": [
                 "warn",
-                { selector: "function", format: ["camelCase", "PascalCase"] },
+                { selector: ["function", "variable"], format: ["camelCase", "PascalCase", "UPPER_CASE"] },
             ],
         },
     },
-];
+]);

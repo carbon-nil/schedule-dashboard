@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import * as React from "react";
 import { api, type PublicAvailability, type Share } from "./api";
 import { addDays, formatJst, todayJst, toUtcIso } from "./time";
 
 /** 共有リンクの作成と失効 (設計書 4.2)。初期値は今日から 7 日間、期限は期間の終了。URL は作成応答でだけ見える。 */
 export const SharePanel = () => {
     const queryClient = useQueryClient();
-    const [from, setFrom] = useState(todayJst);
-    const [to, setTo] = useState(() => addDays(todayJst(), 7));
-    const [minMinutes, setMinMinutes] = useState(30);
-    const [createdUrl, setCreatedUrl] = useState<string | null>(null);
+    const [from, setFrom] = React.useState(todayJst);
+    const [to, setTo] = React.useState(() => addDays(todayJst(), 7));
+    const [minMinutes, setMinMinutes] = React.useState(30);
+    const [createdUrl, setCreatedUrl] = React.useState<string | null>(null);
     const shares = useQuery({ queryKey: ["shares"], queryFn: () => api<Share[]>("GET", "/api/shares") });
 
     // 終了日の 24:00 まで。期限はサーバーの初期値 (期間の終了) に任せる

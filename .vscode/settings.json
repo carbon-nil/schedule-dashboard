@@ -1,0 +1,13 @@
+{
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "[scala]": {
+        "editor.defaultFormatter": "scalameta.metals"
+    },
+    "eslint.workingDirectories": ["frontend"],
+    "metals.sbtScript": "/usr/local/bin/sbt",
+    "metals.customProjectRoot": "backend",
+    "files.watcherExclude": {
+        "**/target/**": true
+    }
+}

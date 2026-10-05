@@ -1,6 +1,7 @@
 package schedule
 
 import cats.effect.{IO, Ref}
+import cats.syntax.all.*
 import doobie.implicits.*
 import io.circe.Json
 import io.circe.parser.parse
@@ -9,7 +10,6 @@ import org.http4s.circe.*
 import org.http4s.client.Client
 import org.http4s.dsl.io.*
 import org.http4s.implicits.*
-import cats.syntax.all.*
 
 import java.nio.file.Files
 
