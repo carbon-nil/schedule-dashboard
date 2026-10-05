@@ -28,6 +28,7 @@ object Main extends IOApp.Simple:
                 health = HttpRoutes.of[IO] { case GET -> Root / "api" / "health" => Ok("ok") }
                 todoist = Todoist(cfg.todoistApiToken, client)
                 limiter <- RateLimit.empty
+                _ <- Backup.daily(xa, cfg.databasePath).start
                 api = Api(xa, google, todoist, FreeTime(xa, google), cfg, limiter)
                 routes = health <+> auth.routes <+> api.publicRoutes <+> auth.protect(api.routes) <+>
                     cfg.staticDir.fold(HttpRoutes.empty[IO])(spa)
