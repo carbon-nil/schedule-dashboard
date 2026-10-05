@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import * as React from "react";
 import { api, type CalendarEntry, type Settings } from "./api";
 
 /** 予定を表示するカレンダーを選ぶ。選んだ集合は共有の busy 計算にも使う (設計書 5.2)。 */
@@ -10,7 +10,7 @@ export const CalendarSettings = () => {
         queryFn: () => api<CalendarEntry[]>("GET", "/api/calendars"),
     });
     const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("GET", "/api/settings") });
-    const [picked, setPicked] = useState<string[] | null>(null);
+    const [picked, setPicked] = React.useState<string[] | null>(null);
     const save = useMutation({
         mutationFn: (ids: string[]) =>
             api<Settings>("PUT", "/api/settings", {

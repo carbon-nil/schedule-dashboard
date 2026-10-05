@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import * as React from "react";
 import { api, ApiError, type Block, type Day, type Task } from "./api";
 import { BlockPanel } from "./BlockPanel";
 import { CalendarSettings } from "./CalendarSettings";
@@ -38,10 +38,10 @@ const Gate = () => {
 
 const Dashboard = () => {
     const client = useQueryClient();
-    const [date, setDate] = useState(todayJst);
-    const [tab, setTab] = useState<"timeline" | "tasks">("timeline");
-    const [draft, setDraft] = useState<Draft>(() => emptyDraft(todayJst()));
-    const [message, setMessage] = useState<string | null>(null);
+    const [date, setDate] = React.useState(todayJst);
+    const [tab, setTab] = React.useState<"timeline" | "tasks">("timeline");
+    const [draft, setDraft] = React.useState<Draft>(() => emptyDraft(todayJst()));
+    const [message, setMessage] = React.useState<string | null>(null);
     // 表示中は 60 秒ごと、画面に戻ったとき、更新ボタンで取り直す (設計書 4.1)
     const day = useQuery({
         queryKey: ["day", date],

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import * as React from "react";
 import { type Block, type Day, type Task } from "./api";
 import { blockLabel, draftFor, type Draft } from "./draft";
 import { formatJstTime, overlaps, toUtcIso } from "./time";
@@ -15,7 +15,7 @@ interface Props {
 
 /** スマホでドラッグしなくても、開始日時と分数のフォームだけで作成・移動・削除できる (設計書 3 章、A24)。 */
 export const BlockPanel = ({ day, draft, onDraftChange, onCreate, onMove, onDelete, onComplete }: Props) => {
-    const [busy, setBusy] = useState(false);
+    const [busy, setBusy] = React.useState(false);
     const selected = day.blocks.find(b => b.id === draft.blockId) ?? null;
     const draftTask = day.tasks.find(t => t.id === draft.taskId) ?? null;
 
