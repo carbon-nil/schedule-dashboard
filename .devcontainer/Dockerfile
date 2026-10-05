@@ -19,3 +19,10 @@ RUN case "${TARGETARCH}" in arm64) arch=aarch64 ;; *) arch=x86_64 ;; esac \
     && unzip -q /tmp/scalafmt.zip -d /usr/local/bin \
     && chmod +x /usr/local/bin/scalafmt \
     && rm /tmp/scalafmt.zip
+
+# Host path of the repository; compose mounts it there (see compose.yaml). The /workspaces path VS Code
+# opens is a symlink to it, so tools that resolve the physical path see the same path as on the host.
+ARG LOCAL_WORKSPACE_FOLDER
+RUN test -n "${LOCAL_WORKSPACE_FOLDER}" \
+    && mkdir -p /workspaces \
+    && ln -s "${LOCAL_WORKSPACE_FOLDER}" /workspaces/schedule-dashboard

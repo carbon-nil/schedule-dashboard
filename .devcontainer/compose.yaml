@@ -1,13 +1,19 @@
+# The repository is mounted at the same path as on the host (LOCAL_WORKSPACE_FOLDER, written to .env by
+# devcontainer.json's initializeCommand), and /workspaces/schedule-dashboard is a symlink to it (Dockerfile).
+# Claude Code keys its session history by the physical working directory, so host and container share one
+# history; the familiar /workspaces path still works for VS Code and the terminal.
 services:
     workspace:
         build:
             context: .
             dockerfile: Dockerfile
+            args:
+                LOCAL_WORKSPACE_FOLDER: ${LOCAL_WORKSPACE_FOLDER}
         command: sleep infinity
         volumes:
-            - ..:/workspaces/schedule-dashboard:cached
-            - node-modules-root:/workspaces/schedule-dashboard/node_modules
-            - node-modules-frontend:/workspaces/schedule-dashboard/frontend/node_modules
+            - ..:${LOCAL_WORKSPACE_FOLDER}:cached
+            - node-modules-root:${LOCAL_WORKSPACE_FOLDER}/node_modules
+            - node-modules-frontend:${LOCAL_WORKSPACE_FOLDER}/frontend/node_modules
             - jvm-cache:/home/vscode/.cache
             - sbt-home:/home/vscode/.sbt
             - ivy-home:/home/vscode/.ivy2
