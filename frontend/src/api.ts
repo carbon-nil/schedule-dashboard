@@ -27,11 +27,18 @@ export interface Task {
     url: string;
 }
 
+export interface Interval {
+    start: string;
+    end: string;
+}
+
 export interface Day {
     date: string;
     events: CalendarEvent[];
     blocks: Block[];
     tasks: Task[];
+    /** Google の busy が取れなかったときは null。空配列とは区別する (A13)。 */
+    freeIntervals: Interval[] | null;
     fetchedAt: string;
     errors: { source: string; target: string; message: string }[];
 }
@@ -43,9 +50,37 @@ export interface CalendarEntry {
     primary: boolean;
 }
 
+/** weekday は月曜=0、日曜=6。分は日本時間の 0 時からの分数。 */
+export interface WeeklyWindow {
+    weekday: number;
+    startMinute: number;
+    endMinute: number;
+}
+
 export interface Settings {
     settingsVersion: number;
     selectedCalendarIds: string[];
+    weeklyWindows: WeeklyWindow[];
+}
+
+export interface Share {
+    id: string;
+    rangeStart: string;
+    rangeEnd: string;
+    expiresAt: string;
+    revokedAt: string | null;
+    minFreeMinutes: number;
+    createdAt: string;
+    version: number;
+}
+
+export interface PublicAvailability {
+    timezone: string;
+    computedAt: string;
+    externalFetchedAt: string;
+    rangeStart: string;
+    rangeEnd: string;
+    freeIntervals: Interval[];
 }
 
 export class ApiError extends Error {

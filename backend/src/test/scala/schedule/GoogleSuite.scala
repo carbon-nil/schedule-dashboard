@@ -19,8 +19,9 @@ class GoogleSuite extends munit.CatsEffectSuite:
         for
             seen <- Ref.of[IO, List[String]](Nil)
             cache <- Ref.of[IO, Option[(String, Long)]](None)
+            busy <- Ref.of[IO, Map[(List[String], Interval), (Long, List[Interval])]](Map.empty)
             client = Client.fromHttpApp[IO](HttpApp[IO](req => seen.update(_ :+ req.uri.path.renderString) *> app(req)))
-        yield (Google(cfg, client, IO.pure(refresh), cache), seen)
+        yield (Google(cfg, client, IO.pure(refresh), cache, busy), seen)
 
     private val token = Ok("""{"access_token":"at","expires_in":3600}""")
 
@@ -72,6 +73,31 @@ class GoogleSuite extends munit.CatsEffectSuite:
         yield
             assertEquals(r, Left(GoogleError.NotConnected))
             assertEquals(paths, Nil)
+    }
+
+    test("freeBusy は全カレンダーの busy を返し、60 秒は同じキーで再取得しない") {
+        val res =
+            """{"calendars":{"a":{"busy":[{"start":"2026-10-05T10:00:00+09:00","end":"2026-10-05T11:00:00+09:00"}]},
+              "b":{"busy":[]}}}"""
+        for
+            (g, seen) <- google(req => if req.uri.path.renderString == "/token" then token else Ok(res))
+            r <- g.freeBusy(List("a", "b"), range)
+            _ <- g.freeBusy(List("b", "a"), range)
+            paths <- seen.get
+        yield
+            assertEquals(r.map(_._2), Right(List(Interval(jst(5, 10), jst(5, 11)))))
+            assertEquals(paths.count(_.endsWith("/freeBusy")), 1)
+    }
+
+    test("A13: カレンダー 1 件に errors があるか応答に含まれなければ、全体を失敗にする") {
+        val partial = """{"calendars":{"a":{"busy":[]},"b":{"errors":[{"domain":"global","reason":"notFound"}]}}}"""
+        for
+            (g, _) <- google(req => if req.uri.path.renderString == "/token" then token else Ok(partial))
+            withErrors <- g.freeBusy(List("a", "b"), range)
+            missing <- g.freeBusy(List("a", "b", "c"), range)
+        yield
+            assert(withErrors.isLeft)
+            assert(missing.isLeft)
     }
 
     test("カレンダー一覧は reader 以上だけを返す") {

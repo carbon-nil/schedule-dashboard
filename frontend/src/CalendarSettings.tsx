@@ -16,6 +16,7 @@ export const CalendarSettings = () => {
             api<Settings>("PUT", "/api/settings", {
                 expectedVersion: settings.data?.settingsVersion,
                 selectedCalendarIds: ids,
+                weeklyWindows: settings.data?.weeklyWindows ?? [],
             }),
         onSuccess: () => {
             setPicked(null);

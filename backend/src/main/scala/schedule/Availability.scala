@@ -56,3 +56,11 @@ object Availability:
     /** 活動可能時間から busy (Google の予定と Block) を差し引いた空き区間。 */
     def free(windows: Seq[WeeklyWindow], busy: Seq[Interval], range: Interval): Seq[Interval] =
         subtract(merge(expand(windows, range)), merge(clip(busy, range)))
+
+    /** 公開表示だけの加工 (設計書 7 章 5): 開始を now に切り詰め、分単位に丸め、最小連続時間未満を除く。 */
+    def publicFree(free: Seq[Interval], now: Long, minMinutes: Int): Seq[Interval] =
+        val minute = 60000L
+        free
+            .map(i => Interval(i.start.max(now), i.end))
+            .map(i => Interval((i.start + minute - 1) / minute * minute, i.end / minute * minute))
+            .filter(i => i.end - i.start >= minMinutes * minute)
