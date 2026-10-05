@@ -58,6 +58,27 @@ Todoist の「設定」→「連携機能」→「開発者」にある API ト�
 
 DB は Docker の `data` ボリュームに残る。更新は `git pull` のあと `docker compose up -d --build` を流す。
 
+### バックアップと復元
+
+アプリが毎日 03:00（日本時間）に SQLite の `VACUUM INTO` で `/data/backups/schedule-<日付>.db` を書く。WAL 稼働中でも一貫した 1 ファイルになる。日付の新しい 30 個を残し、古いものは消す。同じボリュームにあるので、別の場所にも写しておく。
+
+```sh
+docker compose cp app:/data/backups ./backups
+```
+
+`google_credentials` のトークンは `TOKEN_ENCRYPTION_KEY` で暗号化してあるので、`~/.config/schedule-dashboard/env` も DB とは別の場所に保管する。鍵を失うと Google に再ログインするまで予定と空き時間が出ない。
+
+復元は、アプリを止めて WAL の付属ファイルごと DB を入れ替える。別の場所に写したファイルから戻すときは、先に `docker compose cp ./backups/schedule-<日付>.db app:/data/backups/` で戻す。
+
+```sh
+docker compose stop app
+docker compose run --rm --no-deps --entrypoint sh app -c \
+  'rm -f /data/schedule.db /data/schedule.db-wal /data/schedule.db-shm && cp /data/backups/schedule-<日付>.db /data/schedule.db'
+docker compose start app
+```
+
+起動後に Block、共有リンク、設定、Google のログイン状態が戻っていることを確かめる。
+
 ## ライセンス
 
 [MIT](LICENSE)
