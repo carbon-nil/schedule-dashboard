@@ -60,6 +60,7 @@ docker build -t schedule-dashboard:dev .   # 本番イメージ。起動して /
 | PR2 | Google の予定表示（events.list）、Block の作成・移動・削除、2 列の画面とスマホ用フォーム。ここで使えるようになる                                | A04、A07、A24                    |
 | PR3 | Todoist の一覧と完了、Block とタスクの紐付け                                                                                                    | A03、A14、A22、A26、A27          |
 | PR4 | 活動可能時間の設定、freeBusy、空き時間の表示、共有リンク                                                                                        | A08〜A13、A23                    |
+| PR5 | SQLite の毎日のバックアップと復元手順（設計書 14 章）                                                                                           | 14 章                            |
 
 PR2 では Todoist がまだないため、Block にタイトル列を持たせた。PR3 でタスク参照を足したあとも、Todoist を使わないときのためにタイトルは残した（どちらか一方だけ持つ）。PR2 では表示カレンダーの選択も先に入れた（選ばないと予定が出ないため）。
 
@@ -72,7 +73,7 @@ PR1 と PR2 は同じブランチ `worktree-pr1-scaffold` に積み、PR #1 に�
 - Todoist のタスクの URL は API が返さないので、`https://app.todoist.com/app/task/<id>` を組み立てている（API 資料の「Task URLs」の形式）。
 - 公開 API の回数制限は 1 分の固定窓で、境界では最大 2 倍通る。1 つの窓で持つキー数は 10000 までで、超えたら新しいキーは通さない。接続元は `CF-Connecting-IP`（Cloudflare が上書きする）か接続元アドレスで、閲覧者が書ける `X-Forwarded-For` は使わない。同じキーの同時取得を 1 回にまとめる処理は入れていない（利用者 1 人なので）。
 - Tapir は入れていない。API 型を TypeScript へ生成する必要が出たら入れる。
-- SQLite の毎日のバックアップ（設計書 14 章）はまだない。次に足す。
+- バックアップはアプリの中で毎日 03:00 JST に `VACUUM INTO` で取り（`Backup.scala`）、`/data/backups/` に 30 個残す。別マシンへの複製は README の `docker compose cp` で人が行う。cron や別サービスは足していない（設計書 3 章）。
 
 ## このマシンでの注意
 
@@ -90,3 +91,4 @@ PR1 と PR2 は同じブランチ `worktree-pr1-scaffold` に積み、PR #1 に�
 - 2026-10-05: PR4（活動可能時間、freeBusy、空き時間、共有リンク）を実装した。backend のテストは 38 件。A09 は公開応答のキー集合で、A12・A13・A23 と回数制限は API のテストで確かめた。本番イメージを起動し、Google 未接続では空き時間が「確認できません」になり、プレビューが 503、不明なトークンの共有ページが 404 の表示とヘッダー（no-store、no-referrer、noindex）になることを確かめた。実際の Google アカウントでの freeBusy と共有ページの確認はユーザーが行う。残りは SQLite の毎日のバックアップ。
 - 2026-10-05: PR #3 に Codex の adversarial review（`/codex:adversarial-review master`。`/codex:review` は引数を取れず作業ツリーだけを見る）を掛けた。指摘 2 件を直した: 公開 API で IP の上限を先に見ず不明なトークンごとにカウンターを作っていた点（有効な共有にだけ割り当て、キー数に上限）と、共有ページで日をまたぐ空きを開始日の下に「22:00–02:00」と出していた点（日本時間の日付で分け、終了は 24:00 と出す）。
 - 2026-10-05: karman の現在の構成に追従した（Scala 3.9.0 と scalafix、doobie RC12 などの更新、Node 24・ESLint 10・TypeScript 6・Vite 8、compose 構成の devcontainer、CI）。`@haiiro2gou/eslint-config` 2.0.0 の react プリセットは `import * as React from "react"` と `React.useState` の形を要求するので、合わせて直した。PR #3（空き時間と共有リンク）はこの変更より前のブランチなので、マージ後に `WindowSettings.tsx`、`FreeTime.tsx`、`SharePanel.tsx`、`SharePage.tsx` にも同じ直しが要る。tapir と flyway は karman にあるがこの repo では使わない。prettier と editorconfig の設定も karman と差があるが、全ファイルの整形し直しになるので据え置いた。
+- 2026-10-05: SQLite の毎日のバックアップを足した。`VACUUM INTO` は doobie のトランザクション内では動かないので `Strategy.void` の transactor で流す。復元手順は README の「バックアップと復元」。backend のテストは 43 件。設計書 1〜5 章と 14 章の範囲はこれで揃い、残りは実アカウントでの確認。
