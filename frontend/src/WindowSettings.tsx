@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import * as React from "react";
 import { api, type Settings, type WeeklyWindow } from "./api";
 import { hmToMinutes, minutesToHm } from "./time";
 
@@ -9,7 +9,7 @@ const weekdays = ["月", "火", "水", "木", "金", "土", "日"];
 export const WindowSettings = () => {
     const queryClient = useQueryClient();
     const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("GET", "/api/settings") });
-    const [edited, setEdited] = useState<WeeklyWindow[] | null>(null);
+    const [edited, setEdited] = React.useState<WeeklyWindow[] | null>(null);
     const save = useMutation({
         mutationFn: (windows: WeeklyWindow[]) =>
             api<Settings>("PUT", "/api/settings", {
