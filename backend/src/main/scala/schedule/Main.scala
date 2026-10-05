@@ -4,11 +4,11 @@ import cats.effect.{IO, IOApp, Ref}
 import cats.syntax.all.*
 import com.comcast.ip4s.*
 import fs2.io.file.Path
-import org.http4s.{HttpRoutes, StaticFile}
 import org.http4s.dsl.io.*
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
-import org.http4s.server.staticcontent.{fileService, FileService}
+import org.http4s.server.staticcontent.{FileService, fileService}
+import org.http4s.{HttpRoutes, StaticFile}
 
 import scala.concurrent.duration.*
 
