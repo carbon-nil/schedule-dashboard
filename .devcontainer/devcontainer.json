@@ -1,12 +1,15 @@
 {
     "name": "schedule-dashboard",
     "dockerComposeFile": ["compose.yaml", "compose.local.yaml"],
+    // Also records the host path for compose.yaml (see the comment there); compose reads .env next to it.
     "initializeCommand": [
         "sh",
         "-c",
-        "if [ ! -e \"$1\" ]; then printf 'services: {}' > \"$1\"; fi",
+        "if [ ! -e \"$1\" ]; then printf 'services: {}' > \"$1\"; fi; printf 'LOCAL_WORKSPACE_FOLDER=%s\\n' \"$2\" > \"$3\"",
         "--",
-        "${localWorkspaceFolder}/.devcontainer/compose.local.yaml"
+        "${localWorkspaceFolder}/.devcontainer/compose.local.yaml",
+        "${localWorkspaceFolder}",
+        "${localWorkspaceFolder}/.devcontainer/.env"
     ],
     "service": "workspace",
     "workspaceFolder": "/workspaces/schedule-dashboard",
