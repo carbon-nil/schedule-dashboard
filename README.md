@@ -12,6 +12,8 @@ Google Calendar の予定と自分の作業計画を一画面で見て、空き�
 
 Docker と VS Code の Dev Containers 拡張で「Reopen in Container」を選ぶと、JDK・sbt・Node.js・sqlite3・依存パッケージ、Claude Code と Codex CLI が入る。開発用の DB のファイルは volume（`/data`）に置くので、`DATABASE_PATH=/data/schedule.db` にする。
 
+リポジトリはコンテナの中でもホストと同じパスに mount し、VS Code が開く `/workspaces/schedule-dashboard` はそこへの symlink にしてある。Claude Code はセッションの履歴を物理パスで引くので、ホストの `~/.claude/projects` を mount すれば同じセッションが両側の `claude --resume` に出る。ホストのパスは `initializeCommand` が `.devcontainer/.env` に書く（追跡しない）。
+
 ```bash
 cd backend && sbt test          # テスト
 cd backend && sbt run           # http://localhost:8080 (下の環境変数が要る)
